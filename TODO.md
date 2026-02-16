@@ -1,0 +1,1 @@
+- Streetview API returns gray images for unavailable locations. We can use the metadata API to filter out unavailable locations before requesting the images as that endpoint may be free and faster to query.
