@@ -1,0 +1,68 @@
+# ── Street View Sampling – Run Configuration ────────────────────────────────
+#
+# This file defines one or more sampling jobs.
+# Run with:  python main.py run.yaml
+#
+# A single job is a YAML mapping.  Multiple jobs are a YAML list of mappings.
+# Each job needs a "mode" (place / bbox / point) plus its mode-specific keys.
+# Common optional keys: interval, network_type, edge_index
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Example 1 : area by name (neighbourhood, district…) ────────────────────
+# mode: place
+# name: "Moda, Kadıköy, Istanbul, Turkey"
+# interval: 15               # metres between sample points (default: 15)
+# network_type: all_public   # OSM network type (default: all_public)
+# edge_index: 0              # 0 = longest street segment (default: 0)
+
+# ── Example 2 : bounding box (good for streets that aren't polygon areas) ──
+# mode: bbox
+# north: 40.975
+# south: 40.960
+# east: 29.090
+# west: 29.040
+# interval: 20
+
+# ── Example 3 : center point + radius ──────────────────────────────────────
+# mode: point
+# lat: 40.9667
+# lon: 29.0640
+# radius: 500               # metres (default: 500)
+# interval: 20
+
+# ── Example 4 : custom polygon (4 vertices / any shape) ───────────────────
+#    Define the area with 3+ [lat, lon] vertices.
+#    Vertices are connected in order; the polygon is closed automatically.
+#    Great for diagonal street corridors that don't fit an axis-aligned box.
+#
+# mode: polygon
+# vertices:
+#   - [40.9730, 29.0450]     # top-left
+#   - [40.9730, 29.0900]     # top-right
+#   - [40.9600, 29.0900]     # bottom-right
+#   - [40.9600, 29.0450]     # bottom-left
+# interval: 20
+
+# ── Multiple jobs in one file (uncomment to use) ───────────────────────────
+# - mode: place
+#   name: "Moda, Kadıköy, Istanbul, Turkey"
+#   interval: 15
+#
+# - mode: bbox
+#   north: 40.975
+#   south: 40.960
+#   east: 29.090
+#   west: 29.040
+#   interval: 20
+
+# ── Your job(s) below ──────────────────────────────────────────────────────
+mode: polygon
+vertices:
+  - [40.979594, 29.048832]     
+  - [40.972436, 29.043212]     
+  - [40.964954, 29.064129]     
+  - [40.971175, 29.070652]     
+
+interval: 20
+network_type: all_public
+sample_all: true              

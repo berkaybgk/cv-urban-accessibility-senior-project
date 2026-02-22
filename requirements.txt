@@ -1,0 +1,12 @@
+geopandas>=0.14
+google-cloud-storage>=2.19
+numpy>=1.26
+osmnx>=1.9
+pandas>=2.1
+pyproj>=3.6
+python-dotenv>=1.0
+pyyaml>=6.0
+requests>=2.31
+shapely>=2.0
+tqdm>=4.66
+
