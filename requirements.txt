@@ -9,4 +9,19 @@ pyyaml>=6.0
 requests>=2.31
 shapely>=2.0
 tqdm>=4.66
+torch>=2.0
+torchvision>=0.15
+huggingface_hub>=1.0
 
+# Not sure if these are necessary or not, but I installed them while trying to work with sam3
+# iopath>=0.1.10
+# einops>=0.8
+#timm>=1.0.17
+
+# SAM3 notebook dependencies
+supervision
+jupyter_bbox_widget
+scipy
+pycocotools
+ftfy==6.1.1
+regex

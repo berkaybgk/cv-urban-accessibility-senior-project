@@ -212,3 +212,7 @@ __marimo__/
 
 .idea/
 
+# SAM3 cloned repo and downloaded sample images
+sam3-trials/sam3/
+sam3-trials/images/
+
