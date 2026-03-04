@@ -18,5 +18,8 @@ python-dotenv
 supervision
 jupyter_bbox_widget
 
+# iopath dependency for SAM3
+iopath==0.1.10
+
 # MPS-specific dependency (only needed for local_mps_setup)
 # scipy
