@@ -1,0 +1,35 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  SAM3 Inference Pipeline Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Google Cloud Storage
+gcs:
+  bucket_name: cv-urban-accessibility-bucket
+  project_id: cv-urban-accessibility
+
+  # Path to a single image inside the bucket (used when batch.enabled is false)
+  input_image: streetview/polygon_4v/20260221T142707Z/0598_forward_40.9715456_29.0555065_123.0.jpg
+
+  # Prefix (folder) in the bucket where results will be uploaded
+  output_prefix: segmentation-results/
+
+# Batch mode — process a range of images and extract per-object masks
+batch:
+  enabled: true
+  # GCS folder containing the images
+  input_prefix: streetview/polygon_4v/20260221T142707Z/
+  # Only process images whose leading numeric prefix falls in [min, max]
+  prefix_min: 500
+  prefix_max: 600
+
+# Model settings (applied when loading SAM3)
+model:
+  confidence_threshold: 0.3
+
+# Inference settings
+inference:
+  prompt: street furniture
+  confidence_min: 0.5
+
+# If set, also save results locally (null = skip local save)
+local_output_dir: null

@@ -1,0 +1,48 @@
+{
+  "source": "gs://cv-urban-accessibility-bucket/streetview/polygon_4v/20260221T142707Z/0574_forward_40.969617_29.0630725_125.2.jpg",
+  "timestamp": "2026-03-07T10:36:52.973247+00:00",
+  "image_width": 640,
+  "image_height": 640,
+  "total_pixels": 409600,
+  "prompt": "sidewalk",
+  "confidence_threshold": 0.5,
+  "detection_count": 2,
+  "detections": [
+    {
+      "index": 0,
+      "confidence": 0.8008,
+      "bbox_xyxy": [
+        342.5,
+        336.7,
+        641.7,
+        628.6
+      ],
+      "bbox_width": 299.2,
+      "bbox_height": 291.9,
+      "mask_pixels": 36673,
+      "mask_area_ratio": 0.089534
+    },
+    {
+      "index": 1,
+      "confidence": 0.5508,
+      "bbox_xyxy": [
+        -0.6,
+        343.2,
+        187.7,
+        383.5
+      ],
+      "bbox_width": 188.2,
+      "bbox_height": 40.4,
+      "mask_pixels": 1891,
+      "mask_area_ratio": 0.004617
+    }
+  ],
+  "summary": {
+    "total_segmented_pixels": 38564,
+    "total_segmented_ratio": 0.09415,
+    "mean_confidence": 0.6758,
+    "min_confidence": 0.5508,
+    "max_confidence": 0.8008
+  },
+  "inference_time_s": 0.241
+}

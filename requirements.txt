@@ -7,6 +7,21 @@ pyproj>=3.6
 python-dotenv>=1.0
 pyyaml>=6.0
 requests>=2.31
+opencv-python>=4.8
+scikit-image>=0.22
 shapely>=2.0
 tqdm>=4.66
+torch>=2.0
+torchvision>=0.15
+huggingface_hub>=1.0
+python-dotenv
 
+# Visualization dependencies for SAM3 notebooks
+supervision
+jupyter_bbox_widget
+
+# iopath dependency for SAM3
+iopath==0.1.10
+
+# MPS-specific dependency (only needed for local_mps_setup)
+# scipy
