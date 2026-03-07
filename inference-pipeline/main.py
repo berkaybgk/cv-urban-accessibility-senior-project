@@ -2,9 +2,12 @@
 SAM3 Inference Pipeline
 ───────────────────────
 Loads SAM3 on a CUDA GPU, optionally fetches images from GCS, runs
-text-prompted segmentation, and saves annotated results.
+text-prompted segmentation, and saves annotated results back to GCS.
 
 Usage:
+    # Run from a YAML config file (recommended)
+    python main.py --config config.yaml
+
     # Run all preflight checks without loading the model
     python main.py --preflight
 
@@ -18,13 +21,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
+import re
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+import yaml
 
 # ── Resolve project paths relative to *this file*, not cwd ───────────────
 SCRIPT_DIR = Path(__file__).resolve().parent          # inference-pipeline/
@@ -34,6 +42,131 @@ BPE_PATH = SAM3_REPO_DIR / "sam3" / "assets" / "bpe_simple_vocab_16e6.txt.gz"
 API_TRIALS_DIR = PROJECT_ROOT / "api-trials"
 ENV_PATH = PROJECT_ROOT / ".env"
 OUTPUT_DIR = SCRIPT_DIR / "output"
+
+
+DEFAULT_CONFIG_PATH = SCRIPT_DIR / "config.yaml"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  YAML Configuration
+# ═════════════════════════════════════════════════════════════════════════════
+
+def load_config(path: str | Path | None = None) -> dict[str, Any]:
+    """Load and validate the YAML configuration file."""
+    path = Path(path) if path else DEFAULT_CONFIG_PATH
+    if not path.exists():
+        raise FileNotFoundError(f"Config file not found: {path}")
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+
+    defaults: dict[str, Any] = {
+        "gcs": {
+            "bucket_name": "",
+            "project_id": "",
+            "input_image": "",
+            "output_prefix": "segmentation-results/",
+        },
+        "batch": {
+            "enabled": False,
+            "input_prefix": "",
+            "prefix_min": 0,
+            "prefix_max": 9999,
+        },
+        "model": {"confidence_threshold": 0.3},
+        "inference": {"prompt": "sidewalk", "confidence_min": 0.5},
+        "local_output_dir": None,
+    }
+
+    for section, section_defaults in defaults.items():
+        if isinstance(section_defaults, dict):
+            cfg.setdefault(section, {})
+            for k, v in section_defaults.items():
+                cfg[section].setdefault(k, v)
+        else:
+            cfg.setdefault(section, section_defaults)
+
+    return cfg
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  GCS Client (standalone – no dependency on api-trials/config.py)
+# ═════════════════════════════════════════════════════════════════════════════
+
+class GCSClient:
+    """Thin wrapper around google-cloud-storage driven by explicit config."""
+
+    def __init__(self, project_id: str, bucket_name: str):
+        from google.cloud import storage
+        self._client = storage.Client(project=project_id)
+        self._bucket = self._client.bucket(bucket_name)
+        self.bucket_name = bucket_name
+
+    def download_to_tempfile(self, blob_name: str, suffix: str = ".jpg") -> str:
+        """Download a blob into a temp file and return its path."""
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        self._bucket.blob(blob_name).download_to_filename(tmp.name)
+        tmp.close()
+        return tmp.name
+
+    def upload_bytes(self, data: bytes, blob_name: str,
+                     content_type: str = "image/jpeg",
+                     metadata: dict[str, str] | None = None) -> str:
+        blob = self._bucket.blob(blob_name)
+        if metadata:
+            blob.metadata = metadata
+        blob.upload_from_string(data, content_type=content_type)
+        return f"gs://{self.bucket_name}/{blob_name}"
+
+    def upload_file(self, local_path: str, blob_name: str,
+                    metadata: dict[str, str] | None = None) -> str:
+        blob = self._bucket.blob(blob_name)
+        if metadata:
+            blob.metadata = metadata
+        blob.upload_from_filename(local_path)
+        return f"gs://{self.bucket_name}/{blob_name}"
+
+    def list_blobs(self, prefix: str) -> list[str]:
+        """List blob names under *prefix*, returning only image files."""
+        blobs = self._bucket.list_blobs(prefix=prefix)
+        return [
+            b.name for b in blobs
+            if b.name.lower().endswith((".jpg", ".jpeg", ".png"))
+        ]
+
+
+def _extract_numeric_prefix(filename: str) -> int | None:
+    """Return the leading integer from a filename, or None.
+
+    '0598_forward_40.97_29.05_123.0.jpg'  →  598
+    """
+    m = re.match(r"(\d+)", Path(filename).name)
+    return int(m.group(1)) if m else None
+
+
+_FILENAME_RE = re.compile(
+    r"^(\d+)_(forward|backward|left|right)_([-\d.]+)_([-\d.]+)_([\d.]+)\.\w+$"
+)
+
+
+def _parse_image_filename(filename: str) -> dict[str, str] | None:
+    """Parse a streetview image filename into its components.
+
+    '0598_forward_40.9715456_29.0555065_123.0.jpg'
+    → { index: '0598', direction: 'forward',
+        lat: '40.9715456', lon: '29.0555065', heading: '123.0',
+        coordinate_folder: '0598_40.9715456_29.0555065' }
+    """
+    m = _FILENAME_RE.match(Path(filename).name)
+    if not m:
+        return None
+    return {
+        "index": m.group(1),
+        "direction": m.group(2),
+        "lat": m.group(3),
+        "lon": m.group(4),
+        "heading": m.group(5),
+        "coordinate_folder": f"{m.group(1)}_{m.group(3)}_{m.group(4)}",
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -238,7 +371,7 @@ def annotate(image, detections, label: Optional[str] = None):
     annotated = box_annotator.annotate(annotated, detections)
 
     if label:
-        labels = [f"{label} {c:.2f}" for c in detections.confidence]
+        labels = [f"{c:.2f}" for c in detections.confidence]
         annotated = label_annotator.annotate(annotated, detections, labels)
 
     return annotated
@@ -401,7 +534,250 @@ def segment_local_image(processor, image_path: str, prompt: str,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-#  GCS helpers
+#  GCS single-image workflow (config-driven)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def segment_gcs_image(
+    processor,
+    gcs_client: GCSClient,
+    input_blob: str,
+    output_prefix: str,
+    prompt: str,
+    confidence_min: float = 0.5,
+    local_output_dir: Path | None = None,
+) -> dict:
+    """Fetch one image from GCS, segment it, and upload results back.
+
+    Uploads two artefacts to ``output_prefix`` inside the same bucket:
+        <stem>_seg.jpg   – annotated image
+        <stem>_seg.json  – detection metadata
+
+    Returns the metadata dict.
+    """
+    from PIL import Image
+
+    stem = Path(input_blob).stem
+    suffix = Path(input_blob).suffix or ".jpg"
+
+    _info(f"Downloading gs://{gcs_client.bucket_name}/{input_blob} …")
+    tmp_path = gcs_client.download_to_tempfile(input_blob, suffix=suffix)
+
+    try:
+        image = Image.open(tmp_path).convert("RGB")
+        detections, annotated, meta = segment_image(
+            processor, image, prompt,
+            confidence_min=confidence_min,
+            source_name=f"gs://{gcs_client.bucket_name}/{input_blob}",
+        )
+
+        count = meta["detection_count"]
+        ratio = meta["summary"]["total_segmented_ratio"]
+        print(f"  → {count} '{prompt}' detection(s), segmented area = {ratio:.2%} of image")
+
+        # ── Serialize annotated image to bytes ────────────────────────
+        img_buf = io.BytesIO()
+        annotated.save(img_buf, format="JPEG", quality=95)
+        img_bytes = img_buf.getvalue()
+
+        meta_bytes = json.dumps(meta, indent=2).encode()
+
+        # ── Upload to GCS ─────────────────────────────────────────────
+        out_prefix = output_prefix.rstrip("/")
+        img_blob = f"{out_prefix}/{stem}_seg.jpg"
+        json_blob = f"{out_prefix}/{stem}_seg.json"
+
+        img_uri = gcs_client.upload_bytes(
+            img_bytes, img_blob, content_type="image/jpeg",
+        )
+        _ok(f"Image    → {img_uri}")
+
+        json_uri = gcs_client.upload_bytes(
+            meta_bytes, json_blob, content_type="application/json",
+        )
+        _ok(f"Metadata → {json_uri}")
+
+        # ── Optional local save ───────────────────────────────────────
+        if local_output_dir:
+            local_dir = Path(local_output_dir)
+            local_dir.mkdir(parents=True, exist_ok=True)
+            local_img = local_dir / f"{stem}_seg.jpg"
+            local_json = local_dir / f"{stem}_seg.json"
+            annotated.save(str(local_img))
+            with open(local_json, "w") as f:
+                json.dump(meta, f, indent=2)
+            _ok(f"Local copy → {local_dir}")
+
+    finally:
+        os.remove(tmp_path)
+
+    return meta
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  GCS batch workflow with per-object masks
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _mask_to_png_bytes(mask_array) -> bytes:
+    """Convert a boolean numpy mask to PNG bytes (white=object, black=bg)."""
+    from PIL import Image
+    import numpy as np
+    img = Image.fromarray((mask_array.astype(np.uint8) * 255), mode="L")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def segment_gcs_batch_masks(
+    processor,
+    gcs_client: GCSClient,
+    input_prefix: str,
+    output_prefix: str,
+    prompt: str,
+    confidence_min: float = 0.5,
+    prefix_min: int = 0,
+    prefix_max: int = 9999,
+) -> list[dict]:
+    """Segment a filtered range of images from GCS and upload per-object masks.
+
+    Images are filtered by the leading numeric prefix in their filename:
+    only those with ``prefix_min <= prefix <= prefix_max`` are processed.
+
+    Uploads per image to GCS::
+
+        <output_prefix>/<index>_<lat>_<lon>/<direction>/<prompt>/
+            annotated.jpg
+            metadata.json
+            mask_000.png
+            mask_001.png
+            …
+
+    Returns a list of per-image metadata dicts.
+    """
+    from PIL import Image
+
+    _banner("Batch Mask Extraction")
+    _info(f"GCS prefix   : {input_prefix}")
+    _info(f"Prefix range : {prefix_min} – {prefix_max}")
+    _info(f"Prompt       : {prompt}")
+    _info(f"Conf. min    : {confidence_min}")
+
+    all_blobs = gcs_client.list_blobs(input_prefix)
+    if not all_blobs:
+        _info(f"No images found under gs://{gcs_client.bucket_name}/{input_prefix}")
+        return []
+
+    filtered: list[tuple[int, str]] = []
+    for blob_name in all_blobs:
+        num = _extract_numeric_prefix(blob_name)
+        if num is not None and prefix_min <= num <= prefix_max:
+            filtered.append((num, blob_name))
+    filtered.sort(key=lambda t: t[0])
+
+    if not filtered:
+        _info(f"No images matched prefix range {prefix_min}–{prefix_max}")
+        return []
+
+    _info(f"Matched {len(filtered)} / {len(all_blobs)} images in range")
+
+    out_root = output_prefix.rstrip("/")
+    safe_prompt = re.sub(r"[^\w\-]+", "_", prompt).strip("_")
+    all_meta: list[dict] = []
+
+    skipped = 0
+    for idx, (num, blob_name) in enumerate(filtered, 1):
+        suffix = Path(blob_name).suffix or ".jpg"
+        parsed = _parse_image_filename(blob_name)
+
+        if parsed is None:
+            _info(f"[{idx}/{len(filtered)}] Skipping (unrecognised name): {Path(blob_name).name}")
+            skipped += 1
+            continue
+
+        coord_folder = parsed["coordinate_folder"]
+        direction = parsed["direction"]
+        img_folder = f"{out_root}/{coord_folder}/{direction}/{safe_prompt}"
+
+        _info(f"[{idx}/{len(filtered)}] {Path(blob_name).name}  →  {coord_folder}/{direction}/{safe_prompt}/")
+        tmp_path = gcs_client.download_to_tempfile(blob_name, suffix=suffix)
+
+        try:
+            image = Image.open(tmp_path).convert("RGB")
+            detections, annotated, meta = segment_image(
+                processor, image, prompt,
+                confidence_min=confidence_min,
+                source_name=f"gs://{gcs_client.bucket_name}/{blob_name}",
+            )
+
+            count = meta["detection_count"]
+            ratio = meta["summary"]["total_segmented_ratio"]
+            print(f"     → {count} detection(s), segmented area = {ratio:.2%}")
+
+            # ── Upload annotated image ────────────────────────────────
+            img_buf = io.BytesIO()
+            annotated.save(img_buf, format="JPEG", quality=95)
+            gcs_client.upload_bytes(
+                img_buf.getvalue(),
+                f"{img_folder}/annotated.jpg",
+                content_type="image/jpeg",
+            )
+
+            # ── Upload metadata ───────────────────────────────────────
+            gcs_client.upload_bytes(
+                json.dumps(meta, indent=2).encode(),
+                f"{img_folder}/metadata.json",
+                content_type="application/json",
+            )
+
+            # ── Upload individual masks ───────────────────────────────
+            if detections.mask is not None:
+                for i in range(len(detections)):
+                    mask_bytes = _mask_to_png_bytes(detections.mask[i])
+                    gcs_client.upload_bytes(
+                        mask_bytes,
+                        f"{img_folder}/mask_{i:03d}.png",
+                        content_type="image/png",
+                    )
+
+            _ok(f"Uploaded {count} masks → gs://…/{img_folder}/")
+            all_meta.append(meta)
+        finally:
+            os.remove(tmp_path)
+
+    # ── Batch summary ────────────────────────────────────────────────────
+    _banner("Batch Complete")
+    if skipped:
+        _info(f"Skipped {skipped} file(s) with unrecognised names")
+    total_dets = sum(m["detection_count"] for m in all_meta)
+    ratios = [m["summary"]["total_segmented_ratio"] for m in all_meta]
+    summary_blob = f"{out_root}/_batch_summary_{safe_prompt}.json"
+    batch_summary = {
+        "batch_timestamp": datetime.now(timezone.utc).isoformat(),
+        "input_prefix": input_prefix,
+        "prefix_range": [prefix_min, prefix_max],
+        "prompt": prompt,
+        "confidence_threshold": confidence_min,
+        "images_processed": len(all_meta),
+        "images_skipped": skipped,
+        "total_detections": total_dets,
+        "avg_detections_per_image": round(total_dets / len(all_meta), 2) if all_meta else 0,
+        "avg_segmented_ratio": round(sum(ratios) / len(ratios), 6) if ratios else 0,
+    }
+    gcs_client.upload_bytes(
+        json.dumps(batch_summary, indent=2).encode(),
+        summary_blob,
+        content_type="application/json",
+    )
+
+    _info(f"Images processed : {len(all_meta)}")
+    _info(f"Total detections : {total_dets}")
+    _info(f"Avg segmented    : {batch_summary['avg_segmented_ratio']:.2%}")
+    _ok(f"Summary → gs://…/{summary_blob}")
+
+    return all_meta
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  GCS batch helpers (legacy CLI path)
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _import_gcs_utils():
@@ -501,23 +877,99 @@ def build_parser() -> argparse.ArgumentParser:
         description="SAM3 text-prompted segmentation pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument("--config", type=str, default=None,
+                   help="Path to a YAML config file (default: inference-pipeline/config.yaml)")
     p.add_argument("--preflight", action="store_true",
                    help="Run environment / GPU / SAM3 checks only (no model load)")
     p.add_argument("--image", type=str,
                    help="Path to a local image to segment")
     p.add_argument("--gcs-prefix", type=str,
-                   help="GCS blob prefix to fetch images from")
-    p.add_argument("--prompt", type=str, default="sidewalk",
-                   help="Text prompt for segmentation (default: 'sidewalk')")
-    p.add_argument("--confidence", type=float, default=0.5,
-                   help="Minimum detection confidence (default: 0.5)")
+                   help="GCS blob prefix to fetch images from (batch mode)")
+    p.add_argument("--prompt", type=str, default=None,
+                   help="Text prompt for segmentation (overrides config)")
+    p.add_argument("--confidence", type=float, default=None,
+                   help="Minimum detection confidence (overrides config)")
     p.add_argument("--output-dir", type=str, default=None,
-                   help="Directory to save annotated images (default: inference-pipeline/output/)")
+                   help="Directory to save annotated images locally (overrides config)")
     return p
+
+
+def _run_config_mode(processor, cfg: dict[str, Any]) -> None:
+    """Execute the config-driven GCS single-image workflow."""
+    gcs_cfg = cfg["gcs"]
+    inf_cfg = cfg["inference"]
+
+    input_image = gcs_cfg["input_image"]
+    if not input_image:
+        _fail("gcs.input_image is empty in config – nothing to segment.")
+        return
+
+    gcs_client = GCSClient(
+        project_id=gcs_cfg["project_id"],
+        bucket_name=gcs_cfg["bucket_name"],
+    )
+
+    local_out = Path(cfg["local_output_dir"]) if cfg.get("local_output_dir") else None
+
+    _banner("Config-driven GCS Segmentation")
+    _info(f"Input blob   : {input_image}")
+    _info(f"Output prefix: {gcs_cfg['output_prefix']}")
+    _info(f"Prompt       : {inf_cfg['prompt']}")
+    _info(f"Conf. min    : {inf_cfg['confidence_min']}")
+
+    meta = segment_gcs_image(
+        processor=processor,
+        gcs_client=gcs_client,
+        input_blob=input_image,
+        output_prefix=gcs_cfg["output_prefix"],
+        prompt=inf_cfg["prompt"],
+        confidence_min=inf_cfg["confidence_min"],
+        local_output_dir=local_out,
+    )
+
+    _banner("Done")
+    _info(f"Detections: {meta['detection_count']}")
+    _info(f"Segmented area: {meta['summary']['total_segmented_ratio']:.2%}")
+    if meta.get("inference_time_s"):
+        _info(f"Inference time: {meta['inference_time_s']:.2f}s")
+
+
+def _run_batch_mode(processor, cfg: dict[str, Any]) -> None:
+    """Execute the config-driven batch mask-extraction workflow."""
+    gcs_cfg = cfg["gcs"]
+    batch_cfg = cfg["batch"]
+    inf_cfg = cfg["inference"]
+
+    gcs_client = GCSClient(
+        project_id=gcs_cfg["project_id"],
+        bucket_name=gcs_cfg["bucket_name"],
+    )
+
+    segment_gcs_batch_masks(
+        processor=processor,
+        gcs_client=gcs_client,
+        input_prefix=batch_cfg["input_prefix"],
+        output_prefix=gcs_cfg["output_prefix"],
+        prompt=inf_cfg["prompt"],
+        confidence_min=inf_cfg["confidence_min"],
+        prefix_min=batch_cfg["prefix_min"],
+        prefix_max=batch_cfg["prefix_max"],
+    )
 
 
 def main():
     args = build_parser().parse_args()
+
+    # ── Load YAML config (always, for defaults) ──────────────────────────
+    cfg = load_config(args.config)
+
+    # CLI overrides take precedence over the YAML values
+    if args.prompt is not None:
+        cfg["inference"]["prompt"] = args.prompt
+    if args.confidence is not None:
+        cfg["inference"]["confidence_min"] = args.confidence
+    if args.output_dir is not None:
+        cfg["local_output_dir"] = args.output_dir
 
     _banner("SAM3 Inference Pipeline")
     _info(f"Project root : {PROJECT_ROOT}")
@@ -541,23 +993,30 @@ def main():
         return
 
     # ── Load model ───────────────────────────────────────────────────────
+    model_threshold = cfg["model"]["confidence_threshold"]
     try:
-        _, processor = load_model()
+        _, processor = load_model(confidence_threshold=model_threshold)
     except Exception as exc:
         _fail(f"Model loading failed: {exc}")
         sys.exit(1)
 
-    # ── Run inference ────────────────────────────────────────────────────
-    save_dir = Path(args.output_dir) if args.output_dir else OUTPUT_DIR
+    # ── Dispatch: CLI flags → batch mode → single-image config ─────────
+    prompt = cfg["inference"]["prompt"]
+    conf_min = cfg["inference"]["confidence_min"]
+    save_dir = Path(cfg["local_output_dir"]) if cfg.get("local_output_dir") else OUTPUT_DIR
 
     if args.image:
-        segment_local_image(processor, args.image, args.prompt,
-                            confidence_min=args.confidence, save_dir=save_dir)
+        segment_local_image(processor, args.image, prompt,
+                            confidence_min=conf_min, save_dir=save_dir)
     elif args.gcs_prefix:
-        segment_gcs_prefix(processor, args.gcs_prefix, args.prompt,
-                           confidence_min=args.confidence, save_dir=save_dir)
+        segment_gcs_prefix(processor, args.gcs_prefix, prompt,
+                           confidence_min=conf_min, save_dir=save_dir)
+    elif cfg["batch"].get("enabled"):
+        _run_batch_mode(processor, cfg)
+    elif cfg["gcs"].get("input_image"):
+        _run_config_mode(processor, cfg)
     else:
-        _info("No --image or --gcs-prefix given. Nothing to segment.")
+        _info("No --image, --gcs-prefix, batch.enabled, or gcs.input_image in config.")
         _info("Run with --help to see usage.")
 
 
