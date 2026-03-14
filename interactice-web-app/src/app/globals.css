@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* MapLibre popup overrides */
+.maplibregl-popup-content {
+  background: #fafafa;
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.maplibregl-popup-close-button {
+  font-size: 18px;
+  padding: 4px 8px;
+  color: #737373;
+  right: 2px;
+  top: 2px;
+}
+
+.maplibregl-popup-close-button:hover {
+  background: #e5e5e5;
+  border-radius: 4px;
+  color: #171717;
+}
+
+.maplibregl-popup-tip {
+  border-top-color: #fafafa;
+}
+
+.maplibregl-canvas {
+  outline: none;
+}
+
+/* Scrollbar styling */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
