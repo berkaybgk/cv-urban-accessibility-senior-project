@@ -144,7 +144,7 @@ def _extract_numeric_prefix(filename: str) -> int | None:
 
 
 _FILENAME_RE = re.compile(
-    r"^(\d+)_(forward|backward|left|right)_([-\d.]+)_([-\d.]+)_([\d.]+)\.\w+$"
+    r"^(\d+)_(forward-left|forward-right)_([-\d.]+)_([-\d.]+)_([\d.]+)\.\w+$"
 )
 
 
