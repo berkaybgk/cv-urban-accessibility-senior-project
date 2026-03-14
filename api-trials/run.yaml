@@ -1,51 +1,16 @@
 # ── Street View Sampling – Run Configuration ────────────────────────────────
 #
-# This file defines one or more sampling jobs.
 # Run with:  python main.py run.yaml
 #
-# A single job is a YAML mapping.  Multiple jobs are a YAML list of mappings.
-# Each job needs a "mode" (place / bbox / point / polygon) plus mode-specific keys.
-#
 # Common optional keys (all have sensible defaults):
-#   interval            – metres between sample points (default 15)
+#   interval            – metres between midblock sample points (default 15)
 #   network_type        – OSM network type (default all_public)
 #   edge_index          – 0 = longest street segment (default 0)
 #   sample_all          – true to sample every edge (default false)
-#   junction_zone_m     – distance (m) from a junction node that triggers
-#                         "junction_approach" classification (default 15)
-#   corner_threshold_deg– bearing change (°) that triggers "bend" (default 30)
+#   junction_zone_m     – metres from a junction node that are carved out
+#                         for a single junction_approach point (default 15)
+#   max_snap_distance_m – skip panos farther than this from the request (25)
 # ─────────────────────────────────────────────────────────────────────────────
-
-# ── Example 1 : area by name (neighbourhood, district…) ────────────────────
-# mode: place
-# name: "Moda, Kadıköy, Istanbul, Turkey"
-# interval: 15
-# junction_zone_m: 15
-# corner_threshold_deg: 30
-
-# ── Example 2 : bounding box ────────────────────────────────────────────────
-# mode: bbox
-# north: 40.975
-# south: 40.960
-# east: 29.090
-# west: 29.040
-# interval: 20
-
-# ── Example 3 : center point + radius ──────────────────────────────────────
-# mode: point
-# lat: 40.9667
-# lon: 29.0640
-# radius: 500
-# interval: 20
-
-# ── Example 4 : custom polygon ─────────────────────────────────────────────
-# mode: polygon
-# vertices:
-#   - [40.9730, 29.0450]
-#   - [40.9730, 29.0900]
-#   - [40.9600, 29.0900]
-#   - [40.9600, 29.0450]
-# interval: 20
 
 # ── Your job(s) below ──────────────────────────────────────────────────────
 mode: polygon
@@ -59,5 +24,4 @@ interval: 10
 network_type: all_public
 sample_all: true
 junction_zone_m: 15
-corner_threshold_deg: 30
-max_snap_distance_m: 25    # skip panos farther than this from the requested point
+max_snap_distance_m: 25

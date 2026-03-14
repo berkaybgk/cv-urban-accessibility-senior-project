@@ -2,15 +2,22 @@
 """
 Street View Sampling Pipeline – Zone-Aware
 ───────────────────────────────────────────
-Sample points along streets, classify each point by zone (midblock vs
-junction_approach vs bend), fetch Google Street View images with
-zone-appropriate camera angles, and upload everything to GCS.
+Sample points along streets, classify each as *midblock* (sidewalk
+analysis) or *junction_approach* (crossing / signal analysis), fetch
+Google Street View images with zone-appropriate cameras, and upload
+everything to GCS.
+
+Metadata is saved in three places:
+  1. **Per-image** – custom metadata on each GCS blob (direction, zone,
+     snap distance, pano coordinates, heading, etc.)
+  2. **manifest.csv** – one row per image attempt (uploaded / failed /
+     skipped), uploaded to GCS and returned as the results DataFrame
+  3. **run_metadata.json** – run-level summary (zone counts, total
+     images, config used), uploaded to GCS
 
 Usage
 ─────
   python main.py run.yaml
-
-See run.yaml for the YAML format.
 
 Required environment variables (in .env):
     GOOGLE_MAPS_API_KEY
@@ -42,7 +49,6 @@ from config import (
     DEFAULT_NETWORK_TYPE,
     DEFAULT_EDGE_INDEX,
     JUNCTION_ZONE_M,
-    CORNER_THRESHOLD_DEG,
 )
 from gcs_utils import upload_bytes, upload_file
 from street_sampler import (
@@ -71,19 +77,14 @@ def run_pipeline(
     edge_index: int = DEFAULT_EDGE_INDEX,
     sample_all: bool = False,
     junction_zone_m: float = JUNCTION_ZONE_M,
-    corner_threshold_deg: float = CORNER_THRESHOLD_DEG,
     max_snap_distance_m: float = SV_MAX_SNAP_DISTANCE_M,
 ) -> pd.DataFrame:
     """
-    End-to-end pipeline:
-      1. Sample points along streets with zone classification
-      2. For each point, check Street View availability
-      3. Fetch directional images using zone-appropriate camera presets
-      4. Upload images + per-image metadata to GCS
-      5. Upload a CSV manifest + run_metadata.json to GCS
-      6. Return a results DataFrame
+    End-to-end pipeline.
 
-    Exactly one of *place*, *bbox*, *center*, or *vertices* must be provided.
+    Returns a results DataFrame (= the manifest).  The same data is also
+    uploaded to GCS as ``manifest.csv``, and a ``run_metadata.json``
+    summary is stored alongside it.
     """
     sampling_kwargs = dict(
         network_type=network_type,
@@ -91,7 +92,6 @@ def run_pipeline(
         edge_index=edge_index,
         sample_all=sample_all,
         junction_zone_m=junction_zone_m,
-        corner_threshold_deg=corner_threshold_deg,
     )
 
     # ── 1. Sample points ────────────────────────────────────────────────────
@@ -112,14 +112,20 @@ def run_pipeline(
     else:
         raise ValueError("Provide one of: place, bbox, center, or vertices")
 
-    print(f"\n  Sampled {len(df)} points every {interval_m} m\n")
+    if df.empty:
+        print("  No sample points produced — nothing to fetch.")
+        return pd.DataFrame()
+
+    print(f"\n  Sampled {len(df)} points  "
+          f"(midblock: {(df['zone_type'] == 'midblock').sum()}, "
+          f"junction: {(df['zone_type'] == 'junction_approach').sum()})\n")
 
     run_ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     place_slug = _slug(run_label)
     gcs_prefix = f"streetview/{place_slug}/{run_ts}"
     results: list[dict] = []
 
-    # ── 2. Count total images (varies by zone) ─────────────────────────────
+    # ── 2. Image counts (midblock→2, junction→1) ───────────────────────────
     total_images = sum(
         len(CAMERA_PRESETS.get(z, DEFAULT_CAMERA_PRESET))
         for z in df["zone_type"]
@@ -127,9 +133,6 @@ def run_pipeline(
 
     uploaded_count = 0
     skipped_count = 0
-    snapped_too_far_count = 0
-    duplicate_pano_count = 0
-    seen_pano_ids: set[str] = set()
 
     point_bar = tqdm(df.iterrows(), total=len(df), desc="Points",
                      unit="pt", position=0)
@@ -154,15 +157,12 @@ def run_pipeline(
             f"✓{uploaded_count} ⏭{skipped_count}"
         )
 
-        # ── Metadata check (free) ──────────────────────────────────────
-        # check_availability returns None when no coverage OR the panorama
-        # is farther than max_snap_distance_m from the requested point.
+        # ── Metadata check (free, validates snap distance) ────────────
         pano: PanoMetadata | None = check_availability(
             lat, lon, max_snap_m=max_snap_distance_m,
         )
         if pano is None:
             skipped_count += len(camera_dirs)
-            snapped_too_far_count += 1
             image_bar.update(len(camera_dirs))
             results.append({
                 "point_id": point_id, "direction": "",
@@ -171,25 +171,7 @@ def run_pipeline(
             })
             continue
 
-        # ── Duplicate panorama guard ───────────────────────────────────
-        # Two close sample points may resolve to the same physical pano.
-        # Fetching the same pano twice wastes quota and yields identical
-        # images, so we skip the duplicate.
-        if pano.pano_id in seen_pano_ids:
-            duplicate_pano_count += 1
-            skipped_count += len(camera_dirs)
-            image_bar.update(len(camera_dirs))
-            results.append({
-                "point_id": point_id, "direction": "",
-                "status": "duplicate_pano",
-                "zone_type": zone, "edge_id": edge_id,
-                "pano_id": pano.pano_id,
-                "snap_distance_m": pano.snap_distance_m,
-            })
-            continue
-        seen_pano_ids.add(pano.pano_id)
-
-        # ── Fetch images using pano_id (exact panorama) ───────────────
+        # ── Fetch images (using pano_id for exact match) ──────────────
         for direction_label, offset_deg in camera_dirs:
             heading = (bearing + offset_deg) % 360
 
@@ -211,6 +193,7 @@ def run_pipeline(
                 f"{point_id}_{lat}_{lon}-{direction_label}.jpg"
             )
 
+            # ── Per-image metadata (stored on the GCS blob) ───────────
             custom_metadata = {
                 "point_id":           point_id,
                 "direction":          direction_label,
@@ -267,7 +250,7 @@ def run_pipeline(
 
     results_df = pd.DataFrame(results)
 
-    # ── 3. Upload manifest ──────────────────────────────────────────────────
+    # ── 3. Upload manifest (= results_df as CSV) ───────────────────────────
     manifest_local = os.path.join(
         os.path.dirname(__file__) or ".", f"manifest_{run_ts}.csv",
     )
@@ -277,29 +260,24 @@ def run_pipeline(
     print(f"\n  Manifest uploaded → gs://{GCS_BUCKET_NAME}/{manifest_blob}")
 
     # ── 4. Upload run metadata JSON ─────────────────────────────────────────
-    zone_counts = (
-        df["zone_type"].value_counts().to_dict() if "zone_type" in df.columns
-        else {}
-    )
+    zone_counts = df["zone_type"].value_counts().to_dict()
     run_meta = {
-        "label":                  run_label,
-        "network_type":           network_type,
-        "sample_interval_m":      interval_m,
-        "junction_zone_m":        junction_zone_m,
-        "corner_threshold_deg":   corner_threshold_deg,
-        "max_snap_distance_m":    max_snap_distance_m,
-        "edge_index":             edge_index,
-        "total_sample_points":    len(df),
-        "zone_distribution":      zone_counts,
-        "camera_presets":         {
+        "label":               run_label,
+        "network_type":        network_type,
+        "sample_interval_m":   interval_m,
+        "junction_zone_m":     junction_zone_m,
+        "max_snap_distance_m": max_snap_distance_m,
+        "edge_index":          edge_index,
+        "total_sample_points": len(df),
+        "zone_distribution":   zone_counts,
+        "camera_presets":      {
             k: [(lbl, off) for lbl, off in v]
             for k, v in CAMERA_PRESETS.items()
         },
-        "images_uploaded":        int((results_df["status"] == "uploaded").sum()),
-        "points_no_coverage":     snapped_too_far_count,
-        "points_duplicate_pano":  duplicate_pano_count,
-        "unique_panoramas_used":  len(seen_pano_ids),
-        "run_utc":                run_ts,
+        "images_uploaded":     int(
+            (results_df["status"] == "uploaded").sum()
+        ) if len(results_df) else 0,
+        "run_utc":             run_ts,
     }
     meta_blob = f"{gcs_prefix}/run_metadata.json"
     upload_bytes(
@@ -310,15 +288,14 @@ def run_pipeline(
     print(f"  Metadata uploaded  → gs://{GCS_BUCKET_NAME}/{meta_blob}")
 
     # ── 5. Summary ──────────────────────────────────────────────────────────
-    uploaded = int((results_df["status"] == "uploaded").sum()) if len(results_df) else 0
+    uploaded = int(
+        (results_df["status"] == "uploaded").sum()
+    ) if len(results_df) else 0
     skipped = len(results_df) - uploaded
     print("\n── Summary ───────────────────────────────────────────────────────")
     print(f"  Area                : {run_label}")
     print(f"  Total sample points : {len(df)}")
     print(f"  Zone distribution   : {zone_counts}")
-    print(f"  Unique panoramas    : {len(seen_pano_ids)}")
-    print(f"  Duplicate panos     : {duplicate_pano_count}")
-    print(f"  No coverage / far   : {snapped_too_far_count}")
     print(f"  Images uploaded     : {uploaded}")
     print(f"  Skipped / failed    : {skipped}")
 
@@ -343,11 +320,13 @@ def _run_job(job: dict) -> pd.DataFrame:
 
     Common (all optional, have defaults):
       interval, network_type, edge_index, sample_all,
-      junction_zone_m, corner_threshold_deg, max_snap_distance_m
+      junction_zone_m, max_snap_distance_m
     """
     mode = job.get("mode")
     if mode is None:
-        raise ValueError("Each job must have a 'mode' key (place / bbox / point / polygon)")
+        raise ValueError(
+            "Each job must have a 'mode' key (place / bbox / point / polygon)"
+        )
 
     common = dict(
         network_type=job.get("network_type", DEFAULT_NETWORK_TYPE),
@@ -355,8 +334,9 @@ def _run_job(job: dict) -> pd.DataFrame:
         edge_index=int(job.get("edge_index", DEFAULT_EDGE_INDEX)),
         sample_all=bool(job.get("sample_all", False)),
         junction_zone_m=float(job.get("junction_zone_m", JUNCTION_ZONE_M)),
-        corner_threshold_deg=float(job.get("corner_threshold_deg", CORNER_THRESHOLD_DEG)),
-        max_snap_distance_m=float(job.get("max_snap_distance_m", SV_MAX_SNAP_DISTANCE_M)),
+        max_snap_distance_m=float(
+            job.get("max_snap_distance_m", SV_MAX_SNAP_DISTANCE_M)
+        ),
     )
 
     if mode == "place":
@@ -396,17 +376,13 @@ def _run_job(job: dict) -> pd.DataFrame:
         return run_pipeline(vertices=verts, **common)
 
     else:
-        raise ValueError(f"Unknown mode '{mode}'. Use place / bbox / point / polygon")
+        raise ValueError(
+            f"Unknown mode '{mode}'. Use place / bbox / point / polygon"
+        )
 
 
 def load_and_run(yaml_path: str) -> list[pd.DataFrame]:
-    """
-    Load a YAML file and execute every job defined in it.
-
-    The YAML can be:
-      • A single mapping  (one job)
-      • A list of mappings (multiple jobs run sequentially)
-    """
+    """Load a YAML file and execute every job defined in it."""
     with open(yaml_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
@@ -415,7 +391,9 @@ def load_and_run(yaml_path: str) -> list[pd.DataFrame]:
     elif isinstance(data, list):
         jobs = data
     else:
-        raise ValueError("YAML must be a mapping (single job) or a list of mappings")
+        raise ValueError(
+            "YAML must be a mapping (single job) or a list of mappings"
+        )
 
     results = []
     for i, job in enumerate(jobs, 1):
