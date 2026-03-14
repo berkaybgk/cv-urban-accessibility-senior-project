@@ -222,15 +222,15 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             "circle-color": [
               "case",
               ["==", ["get", "pointId"], selectedPointId ?? ""],
+              "#a855f7",
               "#f97316",
-              "#a3a3a3",
             ],
             "circle-stroke-width": 1.5,
             "circle-stroke-color": [
               "case",
               ["==", ["get", "pointId"], selectedPointId ?? ""],
-              "#ffffff",
-              isDarkStyle ? "#525252" : "#e5e5e5",
+              "#e9d5ff",
+              isDarkStyle ? "#7c2d12" : "#fed7aa",
             ],
             "circle-opacity": 0.9,
           }}
