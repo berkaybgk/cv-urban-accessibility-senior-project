@@ -28,7 +28,15 @@ model:
 
 # Inference settings
 inference:
-  prompt: street furniture
+  prompts:
+    - sidewalk
+    - tree
+    - car
+    - electrical cabinet
+    - lamp post
+    - bollard
+    - trash container
+    - street furniture
   confidence_min: 0.5
 
 # If set, also save results locally (null = skip local save)

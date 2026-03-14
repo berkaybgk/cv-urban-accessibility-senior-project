@@ -73,7 +73,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             "prefix_max": 9999,
         },
         "model": {"confidence_threshold": 0.3},
-        "inference": {"prompt": "sidewalk", "confidence_min": 0.5},
+        "inference": {"prompts": ["sidewalk"], "confidence_min": 0.5},
         "local_output_dir": None,
     }
 
@@ -523,7 +523,9 @@ def segment_local_image(processor, image_path: str, prompt: str,
     ratio = meta["summary"]["total_segmented_ratio"]
     print(f"  → {count} '{prompt}' detection(s), segmented area = {ratio:.2%} of image")
 
+    safe_prompt = re.sub(r"[^\w\-]+", "_", prompt).strip("_")
     out_dir = save_dir or OUTPUT_DIR
+    out_dir = out_dir / safe_prompt
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{image_path.stem}_seg{image_path.suffix}"
     annotated.save(str(out_path))
@@ -583,8 +585,9 @@ def segment_gcs_image(
 
         # ── Upload to GCS ─────────────────────────────────────────────
         out_prefix = output_prefix.rstrip("/")
-        img_blob = f"{out_prefix}/{stem}_seg.jpg"
-        json_blob = f"{out_prefix}/{stem}_seg.json"
+        safe_prompt = re.sub(r"[^\w\-]+", "_", prompt).strip("_")
+        img_blob = f"{out_prefix}/{safe_prompt}/{stem}_seg.jpg"
+        json_blob = f"{out_prefix}/{safe_prompt}/{stem}_seg.json"
 
         img_uri = gcs_client.upload_bytes(
             img_bytes, img_blob, content_type="image/jpeg",
@@ -598,7 +601,7 @@ def segment_gcs_image(
 
         # ── Optional local save ───────────────────────────────────────
         if local_output_dir:
-            local_dir = Path(local_output_dir)
+            local_dir = Path(local_output_dir) / safe_prompt
             local_dir.mkdir(parents=True, exist_ok=True)
             local_img = local_dir / f"{stem}_seg.jpg"
             local_json = local_dir / f"{stem}_seg.json"
@@ -815,7 +818,9 @@ def segment_gcs_prefix(processor, prefix: str, prompt: str,
 
     _info(f"Found {len(image_blobs)} images under prefix '{prefix}'")
 
+    safe_prompt = re.sub(r"[^\w\-]+", "_", prompt).strip("_")
     out_dir = save_dir or OUTPUT_DIR
+    out_dir = out_dir / safe_prompt
     out_dir.mkdir(parents=True, exist_ok=True)
 
     all_meta: list[dict] = []
@@ -860,7 +865,7 @@ def segment_gcs_prefix(processor, prefix: str, prompt: str,
             "min_segmented_ratio": round(min(ratios), 6),
             "max_segmented_ratio": round(max(ratios), 6),
         }
-        summary_path = out_dir / "_batch_summary.json"
+        summary_path = out_dir / f"_batch_summary_{safe_prompt}.json"
         with open(summary_path, "w") as f:
             json.dump(batch_summary, f, indent=2)
         _ok(f"Batch summary → {summary_path}")
@@ -885,8 +890,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Path to a local image to segment")
     p.add_argument("--gcs-prefix", type=str,
                    help="GCS blob prefix to fetch images from (batch mode)")
-    p.add_argument("--prompt", type=str, default=None,
-                   help="Text prompt for segmentation (overrides config)")
+    p.add_argument("--prompts", type=str, nargs="+", default=None,
+                   help="List of text prompts for segmentation (overrides config)")
     p.add_argument("--confidence", type=float, default=None,
                    help="Minimum detection confidence (overrides config)")
     p.add_argument("--output-dir", type=str, default=None,
@@ -910,28 +915,32 @@ def _run_config_mode(processor, cfg: dict[str, Any]) -> None:
     )
 
     local_out = Path(cfg["local_output_dir"]) if cfg.get("local_output_dir") else None
+    prompts = inf_cfg.get("prompts", inf_cfg.get("prompt", ["sidewalk"]))
+    if isinstance(prompts, str):
+        prompts = [prompts]
 
     _banner("Config-driven GCS Segmentation")
     _info(f"Input blob   : {input_image}")
     _info(f"Output prefix: {gcs_cfg['output_prefix']}")
-    _info(f"Prompt       : {inf_cfg['prompt']}")
+    _info(f"Prompts      : {prompts}")
     _info(f"Conf. min    : {inf_cfg['confidence_min']}")
 
-    meta = segment_gcs_image(
-        processor=processor,
-        gcs_client=gcs_client,
-        input_blob=input_image,
-        output_prefix=gcs_cfg["output_prefix"],
-        prompt=inf_cfg["prompt"],
-        confidence_min=inf_cfg["confidence_min"],
-        local_output_dir=local_out,
-    )
+    for prompt in prompts:
+        meta = segment_gcs_image(
+            processor=processor,
+            gcs_client=gcs_client,
+            input_blob=input_image,
+            output_prefix=gcs_cfg["output_prefix"],
+            prompt=prompt,
+            confidence_min=inf_cfg["confidence_min"],
+            local_output_dir=local_out,
+        )
 
-    _banner("Done")
-    _info(f"Detections: {meta['detection_count']}")
-    _info(f"Segmented area: {meta['summary']['total_segmented_ratio']:.2%}")
-    if meta.get("inference_time_s"):
-        _info(f"Inference time: {meta['inference_time_s']:.2f}s")
+        _banner(f"Done for prompt: {prompt}")
+        _info(f"Detections: {meta['detection_count']}")
+        _info(f"Segmented area: {meta['summary']['total_segmented_ratio']:.2%}")
+        if meta.get("inference_time_s"):
+            _info(f"Inference time: {meta['inference_time_s']:.2f}s")
 
 
 def _run_batch_mode(processor, cfg: dict[str, Any]) -> None:
@@ -945,16 +954,21 @@ def _run_batch_mode(processor, cfg: dict[str, Any]) -> None:
         bucket_name=gcs_cfg["bucket_name"],
     )
 
-    segment_gcs_batch_masks(
-        processor=processor,
-        gcs_client=gcs_client,
-        input_prefix=batch_cfg["input_prefix"],
-        output_prefix=gcs_cfg["output_prefix"],
-        prompt=inf_cfg["prompt"],
-        confidence_min=inf_cfg["confidence_min"],
-        prefix_min=batch_cfg["prefix_min"],
-        prefix_max=batch_cfg["prefix_max"],
-    )
+    prompts = inf_cfg.get("prompts", inf_cfg.get("prompt", ["sidewalk"]))
+    if isinstance(prompts, str):
+        prompts = [prompts]
+
+    for prompt in prompts:
+        segment_gcs_batch_masks(
+            processor=processor,
+            gcs_client=gcs_client,
+            input_prefix=batch_cfg["input_prefix"],
+            output_prefix=gcs_cfg["output_prefix"],
+            prompt=prompt,
+            confidence_min=inf_cfg["confidence_min"],
+            prefix_min=batch_cfg["prefix_min"],
+            prefix_max=batch_cfg["prefix_max"],
+        )
 
 
 def main():
@@ -964,8 +978,8 @@ def main():
     cfg = load_config(args.config)
 
     # CLI overrides take precedence over the YAML values
-    if args.prompt is not None:
-        cfg["inference"]["prompt"] = args.prompt
+    if args.prompts is not None:
+        cfg["inference"]["prompts"] = args.prompts
     if args.confidence is not None:
         cfg["inference"]["confidence_min"] = args.confidence
     if args.output_dir is not None:
@@ -1001,16 +1015,20 @@ def main():
         sys.exit(1)
 
     # ── Dispatch: CLI flags → batch mode → single-image config ─────────
-    prompt = cfg["inference"]["prompt"]
+    prompts = cfg["inference"].get("prompts", cfg["inference"].get("prompt", ["sidewalk"]))
+    if isinstance(prompts, str):
+        prompts = [prompts]
     conf_min = cfg["inference"]["confidence_min"]
     save_dir = Path(cfg["local_output_dir"]) if cfg.get("local_output_dir") else OUTPUT_DIR
 
     if args.image:
-        segment_local_image(processor, args.image, prompt,
-                            confidence_min=conf_min, save_dir=save_dir)
+        for prompt in prompts:
+            segment_local_image(processor, args.image, prompt,
+                                confidence_min=conf_min, save_dir=save_dir)
     elif args.gcs_prefix:
-        segment_gcs_prefix(processor, args.gcs_prefix, prompt,
-                           confidence_min=conf_min, save_dir=save_dir)
+        for prompt in prompts:
+            segment_gcs_prefix(processor, args.gcs_prefix, prompt,
+                               confidence_min=conf_min, save_dir=save_dir)
     elif cfg["batch"].get("enabled"):
         _run_batch_mode(processor, cfg)
     elif cfg["gcs"].get("input_image"):
