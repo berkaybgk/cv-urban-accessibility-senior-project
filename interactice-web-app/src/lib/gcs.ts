@@ -39,3 +39,11 @@ export async function downloadJSON<T>(blobPath: string): Promise<T> {
   const buf = await downloadBlob(blobPath);
   return JSON.parse(buf.toString("utf-8")) as T;
 }
+
+export async function uploadJSON(blobPath: string, data: unknown): Promise<string> {
+  const bucket = getStorage().bucket(BUCKET_NAME);
+  const blob = bucket.file(blobPath);
+  const json = JSON.stringify(data, null, 2);
+  await blob.save(json, { contentType: "application/json" });
+  return `gs://${BUCKET_NAME}/${blobPath}`;
+}

@@ -203,6 +203,122 @@ function SegmentView({
   );
 }
 
+function ReportForm({
+  point,
+  direction,
+}: {
+  point: PointData;
+  direction: Direction;
+}) {
+  const [open, setOpen] = useState(false);
+  const [description, setDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<"success" | "error" | null>(null);
+
+  const handleSubmit = async () => {
+    if (!description.trim()) return;
+    setSubmitting(true);
+    setResult(null);
+
+    try {
+      const res = await fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pointId: point.pointId,
+          direction,
+          latitude: point.latitude,
+          longitude: point.longitude,
+          description: description.trim(),
+        }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setResult("success");
+      setDescription("");
+      setTimeout(() => {
+        setResult(null);
+        setOpen(false);
+      }, 2000);
+    } catch {
+      setResult("error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="flex items-center gap-2 w-full px-3 py-2 mt-4 text-xs font-medium
+          rounded-md border border-neutral-700 text-neutral-400
+          hover:text-red-400 hover:border-red-500/40 hover:bg-red-500/5 transition-colors"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" />
+          <line x1="4" y1="22" x2="4" y2="15" />
+        </svg>
+        Report an issue with this analysis
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-neutral-700 bg-neutral-800/40 p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-neutral-300">
+          Report Issue
+        </span>
+        <button
+          onClick={() => {
+            setOpen(false);
+            setResult(null);
+          }}
+          className="text-neutral-500 hover:text-neutral-300 text-sm leading-none"
+        >
+          &times;
+        </button>
+      </div>
+      <textarea
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        placeholder="Describe the inconsistency or issue..."
+        rows={3}
+        className="w-full bg-neutral-900 border border-neutral-700 rounded-md px-3 py-2
+          text-sm text-neutral-200 placeholder-neutral-500 outline-none resize-none
+          focus:border-neutral-500 transition-colors"
+      />
+      <div className="flex items-center justify-between mt-2">
+        {result === "success" && (
+          <span className="text-xs text-green-400">Report saved</span>
+        )}
+        {result === "error" && (
+          <span className="text-xs text-red-400">Failed to save</span>
+        )}
+        {!result && <span />}
+        <button
+          onClick={handleSubmit}
+          disabled={submitting || !description.trim()}
+          className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors
+            bg-red-600 text-white hover:bg-red-500
+            disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {submitting ? "Saving..." : "Submit Report"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="bg-neutral-800/50 rounded-lg px-3 py-2">
@@ -426,6 +542,10 @@ export default function AnalysisPanel({
                   Could not load analysis data.
                 </p>
               </div>
+            )}
+
+            {!loading && point && direction && (
+              <ReportForm point={point} direction={direction} />
             )}
           </div>
         </div>
