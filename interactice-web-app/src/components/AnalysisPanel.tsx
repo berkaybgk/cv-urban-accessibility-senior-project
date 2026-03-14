@@ -536,11 +536,42 @@ export default function AnalysisPanel({
               </>
             )}
 
-            {!loading && !analysis && (
-              <div className="flex items-center justify-center h-64">
-                <p className="text-neutral-500 text-sm">
-                  Could not load analysis data.
-                </p>
+            {!loading && !analysis && point && direction && (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center gap-2 rounded-md bg-neutral-800/50 px-3 py-2">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="text-neutral-500 shrink-0"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="12" y1="8" x2="12" y2="12" />
+                    <line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <p className="text-neutral-400 text-xs">
+                    No analysis results available for this point and direction.
+                  </p>
+                </div>
+                {point.directions[direction] && (
+                  <div>
+                    <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">
+                      Original Image
+                    </h3>
+                    <ImageViewer
+                      src={`/api/image?blob=${encodeURIComponent(
+                        point.directions[direction]!.gcsUri
+                      )}`}
+                      alt="Original streetview image"
+                      className="w-full aspect-[16/9]"
+                    />
+                  </div>
+                )}
               </div>
             )}
 
