@@ -1,3 +1,9 @@
 - Streetview API returns gray images for unavailable locations. We can use the metadata API to filter out unavailable locations before requesting the images as that endpoint may be free and faster to query.
 - Combined mask for each query
-- Segementation of the same object twice SAM3
+- SAM3 sometimes segments the same mask twice
+- Estimate sidewalk width from the visible parts.
+- Don't fill behind the obstacles that are out of the sidewalk mask.
+- Create traffic light mask
+- Remove legend from the obstacle overlay
+- Add motorcycles as obstacles
+- Left and Right images require alternative rectification methods
