@@ -7,3 +7,5 @@
 - Remove legend from the obstacle overlay
 - Add motorcycles as obstacles
 - Left and Right images require alternative rectification methods
+- Width Overlay and Footprint switch places
+- Same street sampled twice, in opposite directions

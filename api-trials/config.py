@@ -27,21 +27,19 @@ GCP_PROJECT_ID: str = os.environ.get("GCP_PROJECT_ID", "")
 
 # ── Street sampling defaults ────────────────────────────────────────────────
 DEFAULT_NETWORK_TYPE = "all_public"       # OSM network type for pedestrian/drive/all_public/all/bike etc. 
-DEFAULT_SAMPLE_INTERVAL_M = 15      # metres between sample points
+DEFAULT_SAMPLE_INTERVAL_M = 10      # metres between sample points
 DEFAULT_EDGE_INDEX = 0              # 0 = longest edge in the network
 
 # ── Street View API defaults ────────────────────────────────────────────────
 SV_SIZE = "640x640"
-SV_FOV = 90
-SV_PITCH = 0
+SV_FOV = 120
+SV_PITCH = -30
 
 STREETVIEW_URL = "https://maps.googleapis.com/maps/api/streetview"
 STREETVIEW_META_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
 
 # 4 camera headings per sample point (label, offset from street bearing)
 CAMERA_DIRECTIONS: list[tuple[str, int]] = [
-    ("forward",  0),
-    ("right",    90),
-    ("backward", 180),
-    ("left",     270),
+    ("forward-right",  60),
+    ("forward-left",    300),
 ]
