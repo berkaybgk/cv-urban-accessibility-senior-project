@@ -144,7 +144,8 @@ def _sample_edges(G, interval_m: float, edge_index: int,
     If *sample_all* is True, every edge in the graph is sampled.
     Otherwise only the edge at *edge_index* (sorted by length desc) is used.
     """
-    G_proj = ox.project_graph(G)
+    G_undir = ox.convert.to_undirected(G)
+    G_proj = ox.project_graph(G_undir)
     edges_proj = ox.graph_to_gdfs(G_proj, nodes=False)
     crs_metric = edges_proj.crs
 

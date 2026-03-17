@@ -1,0 +1,46 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Sidewalk Visualization Pipeline Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Google Cloud Storage
+gcs:
+  bucket_name: cv-urban-accessibility-bucket
+  project_id: cv-urban-accessibility
+
+  # GCS prefix containing original streetview images
+  image_prefix: streetview/polygon_4v/20260221T142707Z/
+
+  # GCS prefix containing segmentation masks (output of inference pipeline)
+  masks_prefix: segmentation-results/
+
+  # GCS prefix where visualization results will be uploaded
+  output_prefix: visualization-results/
+
+# Batch mode — process a range of images by leading numeric prefix
+batch:
+  enabled: true
+  prefix_min: 500
+  prefix_max: 600
+
+# Pinhole camera model parameters (for pixel → metre conversion)
+camera:
+  height_m: 2       # camera height above ground (metres)
+  hfov_deg: 90          # horizontal field of view (degrees)
+  pitch_deg: 0           # camera pitch (0 = horizontal)
+
+# Footprint estimation parameters
+footprint:
+  obstacle_is_tree: ["tree"]
+  base_scan_ratio: 0.15       # bottom fraction of non-tree obstacles for base width
+  trunk_scan_ratio: 0.40      # bottom fraction of trees to find trunk
+  aspect_ratio: 1.0           # footprint height / width (1.0 = square)
+  max_height_px: 25           # max footprint height in pixels
+
+# Width estimation bias-reduction parameters
+width_estimation:
+  min_horizon_dist: 20        # ignore rows within this many px of the horizon
+  exclude_extrapolated: true  # exclude rows with border-extrapolated edges
+  iqr_factor: 1.5             # IQR multiplier for outlier rejection
+
+# If set, also save results locally (null = GCS only)
+local_output_dir: null
