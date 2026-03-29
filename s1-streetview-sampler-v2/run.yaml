@@ -1,0 +1,39 @@
+# ── Street View Sampling v2 – Run Configuration ─────────────────────────────
+#
+# Each job defines a polygon area to sample.
+# Run with:  python main.py run.yaml
+#
+# A single job is a YAML mapping.  Multiple jobs are a YAML list of mappings.
+#
+# Required keys:
+#   vertices    : list of [lat, lon] pairs (>= 3)
+#
+# Optional keys:
+#   interval      : metres between sample points  (default: 15)
+#   network_type  : OSM network type               (default: all_public)
+#
+# ── Example: multiple jobs ───────────────────────────────────────────────────
+# - vertices:
+#     - [40.979594, 29.048832]
+#     - [40.972436, 29.043212]
+#     - [40.964954, 29.064129]
+#     - [40.971175, 29.070652]
+#   interval: 15
+#
+# - vertices:
+#     - [40.9730, 29.0450]
+#     - [40.9730, 29.0900]
+#     - [40.9600, 29.0900]
+#     - [40.9600, 29.0450]
+#   interval: 20
+#
+# ── Your job(s) below ────────────────────────────────────────────────────────
+
+vertices:
+  - [40.972521, 29.061285]
+  - [40.966326, 29.071995]
+  - [40.969629, 29.072653]
+  - [40.974638, 29.063173]
+
+interval: 30
+network_type: drive

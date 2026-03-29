@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  Sidewalk Analysis Pipeline v2 — Configuration
+#  Perspective-space analysis with ray-cast metric widths
+# ─────────────────────────────────────────────────────────────────────────────
+
+gcs:
+  bucket_name: cv-urban-accessibility-bucket
+  project_id: cv-urban-accessibility
+  image_prefix: streetview/polygon_4v/20260329T000250Z/
+  masks_prefix: segmentation-results-20260329T000250Z
+  output_prefix: analysis-results-v2-20260329T000250Z/
+  manifest_blob: ""
+
+batch:
+  enabled: true
+  prefix_min: 0
+  prefix_max: 29
+
+# Camera parameters — used for ray-cast width computation
+camera:
+  height_m: 2.5         # GSV vehicle camera height above ground
+  hfov_deg: 90          # horizontal field of view (degrees)
+  pitch_deg: 0          # camera pitch (GSV cameras are approximately level)
+
+# Width estimation parameters
+width_estimation:
+  min_horizon_dist: 10  # min pixels below horizon to avoid blow-up
+  exclude_extrapolated: false  # whether to exclude border-extrapolated rows from width
+
+# Sidewalk analysis parameters
+sidewalk:
+  min_valid_rows: 10    # minimum valid rows to attempt width estimation
+  gap_fill_px: 5        # morphological close kernel for small mask gaps
+  iqr_factor: 1.5       # IQR multiplier for outlier rejection on width
+
+# Obstacle analysis
+obstacle:
+  is_tree: ["tree"]     # class substrings that count as "tree" type
+
+# Obstacle footprint estimation (in rectified space)
+obstacle_footprint:
+  base_scan_ratio: 0.15   # fraction of blob height to scan for base width
+  trunk_scan_ratio: 0.40  # fraction for tree trunk scanning
+  aspect_ratio: 1.0       # footprint height/width ratio
+  max_height: 25           # max footprint height in pixels
+
+# If set, also save results locally (null = GCS only)
+local_output_dir: null
