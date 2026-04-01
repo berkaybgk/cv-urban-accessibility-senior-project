@@ -1,8 +1,39 @@
 import fs from "fs";
 import path from "path";
-import type { Direction, PointData, PointsHashMap } from "./types";
+import { downloadBlob, validateBlobPath } from "@/lib/gcs";
+import type { Direction, PointsHashMap } from "./types";
 
-let cachedPoints: PointsHashMap | null = null;
+let pointsCache: Promise<PointsHashMap> | null = null;
+
+/** Relative to project root unless absolute. Used when POINTS_MANIFEST_BLOB is unset. */
+const DEFAULT_POINTS_MANIFEST = "resources/streetview_polygon_4v_20260329T023321Z-BAGDAT-30m_manifest.csv";
+
+const BUCKET_NAME = process.env.GCS_BUCKET_NAME || "cv-urban-accessibility-bucket";
+
+function resolvePointsManifestPath(): string {
+  const fromEnv = process.env.POINTS_MANIFEST_CSV?.trim();
+  const rel = fromEnv || DEFAULT_POINTS_MANIFEST;
+  return path.isAbsolute(rel) ? rel : path.join(process.cwd(), rel);
+}
+
+/**
+ * Object key under GCS_BUCKET_NAME, or full gs://bucket/key (bucket must match env).
+ */
+function resolveManifestBlobKey(): string | null {
+  const raw = process.env.POINTS_MANIFEST_BLOB?.trim();
+  if (!raw) return null;
+  const m = raw.match(/^gs:\/\/([^/]+)\/(.+)$/);
+  if (m) {
+    const [, bucket, key] = m;
+    if (bucket !== BUCKET_NAME) {
+      throw new Error(
+        `POINTS_MANIFEST_BLOB uses bucket "${bucket}" but GCS_BUCKET_NAME is "${BUCKET_NAME}"`
+      );
+    }
+    return key.replace(/^\/+/, "");
+  }
+  return raw.replace(/^\/+/, "");
+}
 
 function parseCSVLine(line: string): string[] {
   const fields: string[] = [];
@@ -28,15 +59,7 @@ function stripGcsPrefix(uri: string): string {
   return match ? match[1] : uri;
 }
 
-export function getPoints(): PointsHashMap {
-  if (cachedPoints) return cachedPoints;
-
-  const csvPath = path.join(
-    process.cwd(),
-    "resources",
-    "streetview_polygon_4v_20260221T142707Z_manifest.csv"
-  );
-  const raw = fs.readFileSync(csvPath, "utf-8");
+function parseManifestCsv(raw: string): PointsHashMap {
   const lines = raw.split("\n").filter((l) => l.trim().length > 0);
 
   const header = parseCSVLine(lines[0]);
@@ -77,8 +100,38 @@ export function getPoints(): PointsHashMap {
     };
   }
 
-  cachedPoints = points;
   return points;
+}
+
+async function loadPoints(): Promise<PointsHashMap> {
+  const blobKey = resolveManifestBlobKey();
+  let raw: string;
+
+  if (blobKey) {
+    if (!validateBlobPath(blobKey)) {
+      throw new Error(
+        `Manifest object key is not under an allowed prefix (see gcsPaths / GCS_EXTRA_ALLOWED_PREFIXES): ${blobKey}`
+      );
+    }
+    const buf = await downloadBlob(blobKey);
+    raw = buf.toString("utf-8");
+  } else {
+    const csvPath = resolvePointsManifestPath();
+    raw = fs.readFileSync(csvPath, "utf-8");
+  }
+
+  return parseManifestCsv(raw);
+}
+
+/**
+ * Loads the streetview manifest once per process (cached).
+ * Prefers `POINTS_MANIFEST_BLOB` (GCS object key or gs:// URI); otherwise reads `POINTS_MANIFEST_CSV` on disk.
+ */
+export function getPoints(): Promise<PointsHashMap> {
+  if (!pointsCache) {
+    pointsCache = loadPoints();
+  }
+  return pointsCache;
 }
 
 export function buildCoordinateFolder(

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listBlobs } from "@/lib/gcs";
 import { buildCoordinateFolder } from "@/lib/csvParser";
+import { gcsBlobPrefix } from "@/lib/gcsPaths";
 import type { AnalysisResult, AnalysisSegment, Direction } from "@/lib/types";
-
-const VIZ_PREFIX = "visualization-results";
 
 const ARTIFACT_MAP: Record<string, keyof AnalysisSegment["artifacts"]> = {
   "obstacle_silhouettes.png": "obstacleSilhouettes",
@@ -30,7 +29,7 @@ export async function GET(request: NextRequest) {
   }
 
   const coordFolder = buildCoordinateFolder(pointId, parseFloat(lat), parseFloat(lon));
-  const prefix = `${VIZ_PREFIX}/${coordFolder}/${direction}/`;
+  const prefix = `${gcsBlobPrefix("visualization")}${coordFolder}/${direction}/`;
 
   try {
     const blobs = await listBlobs(prefix);

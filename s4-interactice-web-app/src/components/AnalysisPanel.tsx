@@ -490,12 +490,12 @@ export default function AnalysisPanel({
             )}
 
             {!loading && analysis && analysis.segments.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-64 gap-2">
+              <div className="flex flex-col gap-4 w-full min-w-0">
                 <p className="text-neutral-400 text-sm">
                   No analysis segments found for this direction.
                 </p>
                 {analysis.originalImageUrl && (
-                  <div className="w-full mt-4">
+                  <div className="w-full min-w-0 shrink-0">
                     <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">
                       Original Image
                     </h3>

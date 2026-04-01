@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uploadJSON } from "@/lib/gcs";
-
-const REPORTS_PREFIX = "reports";
+import { gcsPathSegment } from "@/lib/gcsPaths";
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,7 +16,7 @@ export async function POST(request: NextRequest) {
 
     const timestamp = new Date().toISOString();
     const safeTimestamp = timestamp.replace(/[:.]/g, "-");
-    const blobPath = `${REPORTS_PREFIX}/${pointId}/${direction}/${safeTimestamp}.json`;
+    const blobPath = `${gcsPathSegment("reports")}/${pointId}/${direction}/${safeTimestamp}.json`;
 
     const report = {
       pointId,

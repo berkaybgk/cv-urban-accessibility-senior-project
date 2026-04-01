@@ -1,7 +1,5 @@
 """
-Configuration loader for the sidewalk analysis pipeline v2.
-
-Reads config.yaml and merges with defaults so every key is always present.
+Configuration loader — same sections as s3-visualization-pipeline (v1).
 """
 
 from __future__ import annotations
@@ -16,7 +14,6 @@ DEFAULT_CONFIG_PATH = SCRIPT_DIR / "config.yaml"
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
-    """Load and validate the pipeline configuration."""
     path = Path(path) if path else DEFAULT_CONFIG_PATH
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
@@ -30,7 +27,7 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             "project_id": "",
             "image_prefix": "",
             "masks_prefix": "segmentation-results/",
-            "output_prefix": "analysis-results-v2/",
+            "output_prefix": "visualization-results/",
             "manifest_blob": "",
         },
         "batch": {
@@ -39,27 +36,21 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             "prefix_max": 9999,
         },
         "camera": {
-            "height_m": 2.5,
+            "height_m": 1.8,
             "hfov_deg": 90,
             "pitch_deg": 0,
         },
-        "width_estimation": {
-            "min_horizon_dist": 10,
-            "exclude_extrapolated": False,
-        },
-        "sidewalk": {
-            "min_valid_rows": 10,
-            "gap_fill_px": 5,
-            "iqr_factor": 1.5,
-        },
-        "obstacle": {
-            "is_tree": ["tree"],
-        },
-        "obstacle_footprint": {
+        "footprint": {
+            "obstacle_is_tree": ["tree"],
             "base_scan_ratio": 0.15,
             "trunk_scan_ratio": 0.40,
             "aspect_ratio": 1.0,
-            "max_height": 25,
+            "max_height_px": 25,
+        },
+        "width_estimation": {
+            "min_horizon_dist": 20,
+            "exclude_extrapolated": True,
+            "iqr_factor": 1.5,
         },
         "local_output_dir": None,
     }

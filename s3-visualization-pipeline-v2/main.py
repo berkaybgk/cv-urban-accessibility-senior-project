@@ -1,26 +1,15 @@
 #!/usr/bin/env python3
 """
-Sidewalk Analysis Pipeline v2
-──────────────────────────────
-Fetches pre-computed segmentation masks from GCS, runs perspective-space
-analysis (ray-cast metric widths, per-row rectification, obstacle
-footprints), generates visualizations, and uploads results back to GCS.
-
-Key v2 improvements over v1:
-  - Ray-cast metric width: pixel edges are projected to the ground plane
-    via the camera model for accurate width measurement.
-  - Per-row rectification with vanishing-point vertical scaling for
-    recognisable "top-down strip" visualization.
-  - Manifest-aware: reads the v2 sampler manifest to get point_type,
-    segment_id, and skip junction points.
-  - Segment-grouped batch processing with per-segment summaries.
-  - Clean visualizations with legends below the image.
+Sidewalk visualization pipeline v2
+──────────────────────────────────
+Same core analysis as v1 (pinhole width, polyfit edges, strip rectification,
+footprint estimation), with v2-only conveniences: modular layout, v1+v2
+filename parsing, optional manifest for junction vs street.
 
 Usage
 ─────
   python main.py --config config.yaml
-  python main.py                              # uses default config.yaml
-  python main.py --image <blob_path>          # single image mode
+  python main.py --image <blob_path>
 """
 
 from __future__ import annotations
@@ -32,7 +21,6 @@ import json
 import re
 import sys
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -77,36 +65,37 @@ _FILENAME_RE_V1 = re.compile(
 def _parse_image_filename(filename: str) -> dict[str, str] | None:
     """Parse a sampler image filename into its components.
 
-    Returns a dict with parsed fields including ``masks_folder`` which
-    matches the GCS mask structure produced by the inference pipeline:
-    ``{segment_id}_{direction}_{lat}``
+    Mask paths match the inference layout (same as v1):
+    ``{masks_prefix}/{point_id}_{lat}_{lon}/{direction}``
     """
     name = Path(filename).name
 
     m = _FILENAME_RE_V2.match(name)
     if m:
+        coordinate_folder = f"{m.group(2)}_{m.group(4)}_{m.group(5)}"
+        direction = m.group(3)
         return {
             "segment_id": m.group(1),
             "point_id": m.group(2),
-            "direction": m.group(3),
+            "direction": direction,
             "lat": m.group(4),
             "lon": m.group(5),
             "heading": m.group(6),
-            "masks_folder": f"{m.group(1)}_{m.group(3)}_{m.group(4)}",
-            "coordinate_folder": f"{m.group(2)}_{m.group(4)}_{m.group(5)}",
+            "coordinate_folder": coordinate_folder,
         }
 
     m = _FILENAME_RE_V1.match(name)
     if m:
+        coordinate_folder = f"{m.group(1)}_{m.group(3)}_{m.group(4)}"
+        direction = m.group(2)
         return {
             "segment_id": "0",
             "point_id": m.group(1),
-            "direction": m.group(2),
+            "direction": direction,
             "lat": m.group(3),
             "lon": m.group(4),
             "heading": m.group(5),
-            "masks_folder": f"{m.group(1)}_{m.group(3)}_{m.group(4)}/{m.group(2)}",
-            "coordinate_folder": f"{m.group(1)}_{m.group(3)}_{m.group(4)}",
+            "coordinate_folder": coordinate_folder,
         }
 
     return None
@@ -203,8 +192,7 @@ def run_batch(cfg: dict[str, Any]) -> None:
     _info(f"Matched {len(filtered)} / {len(image_blobs)} images")
 
     all_summaries: list[dict] = []
-    segment_results: dict[str, list[dict]] = defaultdict(list)
-    n_junctions_skipped = 0
+    n_junction_stubs = 0
     t0 = time.time()
 
     for idx, (num, blob) in enumerate(filtered, 1):
@@ -214,12 +202,11 @@ def run_batch(cfg: dict[str, Any]) -> None:
             continue
 
         coord_folder = parsed["coordinate_folder"]
-        masks_folder = parsed["masks_folder"]
         direction = parsed["direction"]
         segment_id = parsed["segment_id"]
         point_type = _get_point_type(parsed, manifest)
 
-        img_masks = f"{masks_prefix}/{masks_folder}"
+        img_masks = f"{masks_prefix}/{coord_folder}/{direction}"
         img_output = f"{output_prefix}/{coord_folder}/{direction}"
 
         _banner(f"[{idx}/{len(filtered)}] {Path(blob).name} "
@@ -230,7 +217,7 @@ def run_batch(cfg: dict[str, Any]) -> None:
             local_dir = str(Path(local_out) / coord_folder / direction)
 
         if point_type == "junction":
-            n_junctions_skipped += 1
+            n_junction_stubs += 1
             meta = {
                 "segment_id": segment_id,
                 "point_id": parsed["point_id"],
@@ -251,47 +238,19 @@ def run_batch(cfg: dict[str, Any]) -> None:
         )
         summary["segment_id"] = segment_id
         all_summaries.append(summary)
-        segment_results[segment_id].append(summary)
 
     elapsed = time.time() - t0
 
-    # Per-segment summaries
-    for seg_id, results in segment_results.items():
-        seg_widths = []
-        for r in results:
-            if r.get("status") != "ok":
-                continue
-            for seg_data in r.get("segments", {}).values():
-                stats = seg_data.get("width_stats", {})
-                if stats and stats.get("median_cm") is not None:
-                    seg_widths.append(stats["median_cm"])
+    segment_ids = {s.get("segment_id") for s in all_summaries if s.get("segment_id")}
 
-        seg_summary = {
-            "segment_id": seg_id,
-            "n_images": len(results),
-            "n_successful": sum(1 for r in results if r.get("status") == "ok"),
-            "median_width_cm": (
-                round(float(__import__("numpy").median(seg_widths)), 1)
-                if seg_widths else None
-            ),
-            "width_samples": seg_widths,
-        }
-
-        seg_blob = f"{output_prefix}/segment_{seg_id}_summary.json"
-        gcs.upload_bytes(
-            json.dumps(seg_summary, indent=2).encode(),
-            seg_blob, "application/json",
-        )
-
-    # Batch summary
     batch_summary = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "v2",
         "image_prefix": image_prefix,
         "prefix_range": [pmin, pmax],
         "images_processed": len(all_summaries),
-        "junctions_skipped": n_junctions_skipped,
-        "segments_analyzed": len(segment_results),
+        "junction_stubs": n_junction_stubs,
+        "segment_ids": sorted(segment_ids, key=lambda x: str(x)),
         "elapsed_s": round(elapsed, 1),
         "per_image": all_summaries,
     }
@@ -303,8 +262,7 @@ def run_batch(cfg: dict[str, Any]) -> None:
 
     _banner("Batch Complete")
     _info(f"Images processed    : {len(all_summaries)}")
-    _info(f"Junctions skipped   : {n_junctions_skipped}")
-    _info(f"Segments analysed   : {len(segment_results)}")
+    _info(f"Junction stubs      : {n_junction_stubs}")
     _info(f"Elapsed             : {elapsed:.1f}s")
     _ok(f"Summary -> gs://{gcs.bucket_name}/{summary_blob}")
 
@@ -313,7 +271,7 @@ def run_batch(cfg: dict[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        description="Sidewalk analysis pipeline v2 — perspective-space analysis",
+        description="Sidewalk visualization pipeline v2 (v1-style analysis)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--config", type=str, default=None,
@@ -351,7 +309,6 @@ def main():
         masks_prefix = gcs_cfg["masks_prefix"].rstrip("/")
         output_prefix = gcs_cfg["output_prefix"].rstrip("/")
         coord = parsed["coordinate_folder"]
-        masks_folder = parsed["masks_folder"]
         direction = parsed["direction"]
 
         local_dir = None
@@ -361,7 +318,7 @@ def main():
         _banner("Sidewalk Analysis Pipeline v2 -- Single Image")
         process_street_image(
             gcs, args.image,
-            f"{masks_prefix}/{masks_folder}",
+            f"{masks_prefix}/{coord}/{direction}",
             f"{output_prefix}/{coord}/{direction}",
             cfg,
             local_output_dir=local_dir,
