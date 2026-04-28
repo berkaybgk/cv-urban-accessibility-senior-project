@@ -16,8 +16,8 @@ export const gcsPaths = {
    * prefix to lock to one capture run (must match manifest gs:// object keys).
    */
   original: envPath("GCS_PREFIX_ORIGINAL", "streetview"),
-  segmentation: envPath("GCS_PREFIX_SEGMENTATION", "v2/segmentation-results"),
-  visualization: envPath("GCS_PREFIX_VISUALIZATION", "v2/visualization-results"),
+  segmentation: envPath("GCS_PREFIX_SEGMENTATION", "v3/segmentation-results"),
+  visualization: envPath("GCS_PREFIX_VISUALIZATION", "v3/visualization-results"),
   reports: envPath("GCS_PREFIX_REPORTS", "reports"),
 } as const;
 

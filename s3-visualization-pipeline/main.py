@@ -80,8 +80,8 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             "bucket_name": "",
             "project_id": "",
             "image_prefix": "",
-            "masks_prefix": "segmentation-results/",
-            "output_prefix": "visualization-results/",
+            "masks_prefix": "v3/segmentation-results/",
+            "output_prefix": "v3/visualization-results/",
         },
         "batch": {
             "enabled": False,
@@ -176,28 +176,115 @@ def image_array_to_png_bytes(arr: np.ndarray) -> bytes:
 #  Filename parsing  (mirrors inference-pipeline/main.py)
 # ═════════════════════════════════════════════════════════════════════════════
 
-_FILENAME_RE = re.compile(
+_FILENAME_RE_NEW = re.compile(
+    r"^(\d+)-(\d+)_(forward|backward|left|right)_([-\d.]+)_([-\d.]+)_([\d.]+)\.\w+$"
+)
+_FILENAME_RE_OLD = re.compile(
     r"^(\d+)_(forward|backward|left|right)_([-\d.]+)_([-\d.]+)_([\d.]+)\.\w+$"
 )
 
 
 def _extract_numeric_prefix(filename: str) -> int | None:
-    m = re.match(r"(\d+)", Path(filename).name)
-    return int(m.group(1)) if m else None
+    parsed = _parse_image_filename(filename)
+    if parsed is None:
+        return None
+    return int(parsed["point_id"])
 
 
 def _parse_image_filename(filename: str) -> dict[str, str] | None:
-    m = _FILENAME_RE.match(Path(filename).name)
-    if not m:
+    name = Path(filename).name
+
+    # New naming: streetId-pointId_direction_lat_lon_heading.jpg
+    m_new = _FILENAME_RE_NEW.match(name)
+    if m_new:
+        street_id, point_id, direction, lat, lon, heading = m_new.groups()
+        return {
+            "street_id": street_id,
+            "point_id": point_id,
+            "index": point_id,  # backward-compatible alias
+            "direction": direction,
+            "lat": lat,
+            "lon": lon,
+            "heading": heading,
+            # Segmentation folders are keyed by point_id + coordinates.
+            "coordinate_folder": f"{point_id}_{lat}_{lon}",
+        }
+
+    # Old naming: pointId_direction_lat_lon_heading.jpg
+    m_old = _FILENAME_RE_OLD.match(name)
+    if not m_old:
         return None
+    point_id, direction, lat, lon, heading = m_old.groups()
     return {
-        "index": m.group(1),
-        "direction": m.group(2),
-        "lat": m.group(3),
-        "lon": m.group(4),
-        "heading": m.group(5),
-        "coordinate_folder": f"{m.group(1)}_{m.group(3)}_{m.group(4)}",
+        "street_id": "",
+        "point_id": point_id,
+        "index": point_id,  # backward-compatible alias
+        "direction": direction,
+        "lat": lat,
+        "lon": lon,
+        "heading": heading,
+        "coordinate_folder": f"{point_id}_{lat}_{lon}",
     }
+
+
+def _resolve_masks_prefix(
+    gcs: GCSClient,
+    masks_root: str,
+    parsed: dict[str, str],
+    target_lat: float | None = None,
+    target_lon: float | None = None,
+) -> tuple[str, str]:
+    """
+    Resolve masks prefix for one image.
+
+    Returns (resolved_masks_prefix, resolved_coordinate_folder).
+    """
+    direction = parsed["direction"]
+    point_id = parsed["point_id"]
+    preferred_coord = parsed["coordinate_folder"]
+    preferred = f"{masks_root}/{preferred_coord}/{direction}"
+
+    # Fast path: exact coordinate folder exists and has any PNG mask.
+    exact = [b for b in gcs.list_blobs(preferred + "/") if b.endswith(".png")]
+    if exact:
+        return preferred, preferred_coord
+
+    # Fallback: scan any coordinate folder for this point_id and direction.
+    all_for_point = gcs.list_blobs(f"{masks_root}/{point_id}_")
+    coord_candidates: set[str] = set()
+    marker = f"/{direction}/"
+    for blob in all_for_point:
+        if marker not in blob or not blob.endswith(".png"):
+            continue
+        rel = blob[len(masks_root.rstrip("/") + "/"):]
+        coord_folder = rel.split("/", 1)[0]
+        coord_candidates.add(coord_folder)
+
+    if not coord_candidates:
+        return preferred, preferred_coord
+
+    # Prefer exact coord if it exists among candidates (e.g. formatting differences elsewhere).
+    if preferred_coord in coord_candidates:
+        return preferred, preferred_coord
+
+    def _coord_distance_sq(coord_folder: str) -> float:
+        if target_lat is None or target_lon is None:
+            return float("inf")
+        m = re.match(r"^\d+_([-\d.]+)_([-\d.]+)$", coord_folder)
+        if not m:
+            return float("inf")
+        try:
+            c_lat = float(m.group(1))
+            c_lon = float(m.group(2))
+        except ValueError:
+            return float("inf")
+        d_lat = c_lat - target_lat
+        d_lon = c_lon - target_lon
+        return d_lat * d_lat + d_lon * d_lon
+
+    # Prefer candidate closest to image coordinates; tie-break lexicographically.
+    chosen_coord = sorted(coord_candidates, key=lambda c: (_coord_distance_sq(c), c))[0]
+    return f"{masks_root}/{chosen_coord}/{direction}", chosen_coord
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -885,6 +972,7 @@ def run_batch(cfg: dict[str, Any]) -> None:
     masks_prefix = gcs_cfg["masks_prefix"].rstrip("/")
     output_prefix = gcs_cfg["output_prefix"].rstrip("/")
     pmin, pmax = batch_cfg["prefix_min"], batch_cfg["prefix_max"]
+    allowed_dirs = {"forward", "backward"}
 
     local_out = Path(cfg["local_output_dir"]) if cfg.get("local_output_dir") else None
 
@@ -900,8 +988,13 @@ def run_batch(cfg: dict[str, Any]) -> None:
 
     filtered: list[tuple[int, str]] = []
     for blob in image_blobs:
-        num = _extract_numeric_prefix(blob)
-        if num is not None and pmin <= num <= pmax:
+        parsed = _parse_image_filename(blob)
+        if parsed is None:
+            continue
+        if parsed["direction"] not in allowed_dirs:
+            continue
+        num = int(parsed["point_id"])
+        if pmin <= num <= pmax:
             filtered.append((num, blob))
     filtered.sort(key=lambda t: t[0])
 
@@ -922,13 +1015,26 @@ def run_batch(cfg: dict[str, Any]) -> None:
 
         coord_folder = parsed["coordinate_folder"]
         direction = parsed["direction"]
-        img_masks = f"{masks_prefix}/{coord_folder}/{direction}"
-        img_output = f"{output_prefix}/{coord_folder}/{direction}"
+        try:
+            t_lat = float(parsed["lat"])
+            t_lon = float(parsed["lon"])
+        except (KeyError, ValueError):
+            t_lat, t_lon = None, None
+
+        img_masks, resolved_coord = _resolve_masks_prefix(
+            gcs, masks_prefix, parsed, target_lat=t_lat, target_lon=t_lon)
+        if resolved_coord != coord_folder:
+            _info(f"Resolved mask folder for point {parsed['point_id']}: "
+                  f"{coord_folder} -> {resolved_coord}")
+        img_output = f"{output_prefix}/{resolved_coord}/{direction}"
 
         _banner(f"[{idx}/{len(filtered)}] {Path(blob).name}")
+        _info(f"Source image blob: {blob}")
+        _info(f"Resolved masks   : {img_masks}")
+        _info(f"Output folder    : {img_output}")
         summary = process_single_image(
             gcs, blob, img_masks, img_output, cfg,
-            local_output_dir=local_out / coord_folder / direction if local_out else None)
+            local_output_dir=local_out / resolved_coord / direction if local_out else None)
 
         if summary:
             all_summaries.append(summary)
@@ -997,16 +1103,27 @@ def main():
         output_prefix = gcs_cfg["output_prefix"].rstrip("/")
         coord = parsed["coordinate_folder"]
         direction = parsed["direction"]
+        try:
+            t_lat = float(parsed["lat"])
+            t_lon = float(parsed["lon"])
+        except (KeyError, ValueError):
+            t_lat, t_lon = None, None
+
+        resolved_masks, resolved_coord = _resolve_masks_prefix(
+            gcs, masks_prefix, parsed, target_lat=t_lat, target_lon=t_lon)
+        if resolved_coord != coord:
+            _info(f"Resolved mask folder for point {parsed['point_id']}: "
+                  f"{coord} -> {resolved_coord}")
 
         local_out = Path(cfg["local_output_dir"]) if cfg.get("local_output_dir") else None
 
         _banner("Sidewalk Visualization Pipeline — Single Image")
         process_single_image(
             gcs, args.image,
-            f"{masks_prefix}/{coord}/{direction}",
-            f"{output_prefix}/{coord}/{direction}",
+            resolved_masks,
+            f"{output_prefix}/{resolved_coord}/{direction}",
             cfg,
-            local_output_dir=local_out / coord / direction if local_out else None)
+            local_output_dir=local_out / resolved_coord / direction if local_out else None)
         _banner("Done")
     elif cfg["batch"].get("enabled"):
         run_batch(cfg)

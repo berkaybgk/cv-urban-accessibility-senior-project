@@ -8,19 +8,23 @@ gcs:
   project_id: cv-urban-accessibility
 
   # GCS prefix containing original streetview images
-  image_prefix: streetview/polygon_4v/20260221T142707Z/
+  image_prefix: streetview/polygon_4v/20260404T133859Z/
 
   # GCS prefix containing segmentation masks (output of inference pipeline)
-  masks_prefix: segmentation-results/
+  masks_prefix: v3/segmentation-results/
 
   # GCS prefix where visualization results will be uploaded
-  output_prefix: visualization-results/
+  output_prefix: v3/visualization-results/
 
-# Batch mode — process a range of images by leading numeric prefix
+# Batch mode — process a range of images by point_id
+# Supports both filename formats:
+#   - street_id-point_id_direction_lat_lon_heading.jpg
+#   - point_id_direction_lat_lon_heading.jpg
+# Only forward/backward images are processed.
 batch:
   enabled: true
-  prefix_min: 500
-  prefix_max: 600
+  prefix_min: 258
+  prefix_max: 284
 
 # Pinhole camera model parameters (for pixel → metre conversion)
 camera:
