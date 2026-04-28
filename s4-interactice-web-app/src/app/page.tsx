@@ -7,6 +7,7 @@ import type {
   PointsHashMap,
   Direction,
   AnalysisResult,
+  AlternativeWidthResult,
 } from "@/lib/types";
 import type { MapViewHandle } from "@/components/MapView";
 import AnalysisPanel from "@/components/AnalysisPanel";
@@ -42,6 +43,21 @@ async function fetchAnalysis(
   return res.json();
 }
 
+async function fetchAlternativeWidth(
+  point: PointData,
+  direction: Direction
+): Promise<AlternativeWidthResult> {
+  const params = new URLSearchParams({
+    pointId: point.pointId,
+    direction,
+    lat: String(point.latitude),
+    lon: String(point.longitude),
+  });
+  const res = await fetch(`/api/alt-width?${params}`);
+  if (!res.ok) throw new Error("Failed to fetch alternative width");
+  return res.json();
+}
+
 export default function HomePage() {
   const [points, setPoints] = useState<PointsHashMap>({});
   const [loading, setLoading] = useState(true);
@@ -52,6 +68,8 @@ export default function HomePage() {
     null
   );
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [alternativeWidth, setAlternativeWidth] =
+    useState<AlternativeWidthResult | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
 
@@ -80,13 +98,19 @@ export default function HomePage() {
       setPanelOpen(true);
       setAnalysisLoading(true);
       setAnalysis(null);
+      setAlternativeWidth(null);
 
       try {
-        const data = await fetchAnalysis(point, direction);
-        setAnalysis(data);
+        const [analysisData, altData] = await Promise.all([
+          fetchAnalysis(point, direction),
+          fetchAlternativeWidth(point, direction),
+        ]);
+        setAnalysis(analysisData);
+        setAlternativeWidth(altData);
       } catch (err) {
         console.error(err);
         setAnalysis(null);
+        setAlternativeWidth(null);
       } finally {
         setAnalysisLoading(false);
       }
@@ -114,6 +138,7 @@ export default function HomePage() {
     setSelectedPoint(null);
     setSelectedDirection(null);
     setAnalysis(null);
+    setAlternativeWidth(null);
   }, []);
 
   const handleSearchSelect = useCallback((point: PointData) => {
@@ -178,6 +203,7 @@ export default function HomePage() {
         point={selectedPoint}
         direction={selectedDirection}
         analysis={analysis}
+        alternativeWidth={alternativeWidth}
         loading={analysisLoading}
         onChangeDirection={handleChangeDirection}
       />

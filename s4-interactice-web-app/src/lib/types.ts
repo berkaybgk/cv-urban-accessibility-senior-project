@@ -43,6 +43,16 @@ export interface AnalysisResult {
   segments: AnalysisSegment[];
 }
 
+export interface AlternativeWidthResult {
+  pointId: string;
+  direction: Direction;
+  coordinateFolder: string;
+  metadataUrl?: string;
+  overlayUrl?: string;
+  scene3dUrl?: string;
+  width3dUrl?: string;
+}
+
 export interface WidthMetadata {
   segment: string;
   width_cm: {

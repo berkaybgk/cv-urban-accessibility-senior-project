@@ -102,6 +102,31 @@ Useful flags:
 | `--plot3d` | Two 3D PNGs: scene + plane + camera, and per-column width chords |
 | `--cam_height` | Camera height in meters for scale (default `2.5`, typical for GSV-style imagery) |
 
+### GCS batch mode for alternative (left/right) estimation
+
+This repo now includes `batch_gcs_alt_width.py` to run the stronger point-cloud method
+on GCS images directly and upload outputs for the web app.
+
+1) Edit `batch_gcs_alt_width.yaml`:
+- `gcs.image_prefix`: source run folder (for example `streetview/polygon_4v/20260404T133859Z/`)
+- `batch.point_id_min` / `batch.point_id_max`
+- `batch.directions`: usually `["left", "right"]`
+- `gcs.output_prefix`: where artifacts are uploaded (default `v3/alternative-width-results/`)
+
+2) Run:
+
+```bash
+python batch_gcs_alt_width.py --config batch_gcs_alt_width.yaml
+```
+
+Per point+direction uploads:
+- `alt_width_metadata.json` (always written, includes status + width when successful)
+- `alt_width_overlay.png` (if enabled)
+- `alt_width_scene3d.png` and `alt_width_width3d.png` (if enabled)
+
+Batch summary:
+- `<output_prefix>/_alt_width_batch_summary.json`
+
 ## 5. Outputs (under `--out_dir`)
 
 - `predicted_widths.csv` — per-ID predicted width (and GT columns when available)

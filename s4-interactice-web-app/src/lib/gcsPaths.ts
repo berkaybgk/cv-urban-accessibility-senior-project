@@ -18,6 +18,7 @@ export const gcsPaths = {
   original: envPath("GCS_PREFIX_ORIGINAL", "streetview"),
   segmentation: envPath("GCS_PREFIX_SEGMENTATION", "v3/segmentation-results"),
   visualization: envPath("GCS_PREFIX_VISUALIZATION", "v3/visualization-results"),
+  alternativeWidth: envPath("GCS_PREFIX_ALT_WIDTH", "v3/alternative-width-results"),
   reports: envPath("GCS_PREFIX_REPORTS", "reports"),
 } as const;
 
@@ -40,6 +41,12 @@ export function gcsAllowedBlobPrefixes(): string[] {
     .map((s) => s.trim().replace(/^\/+/, ""))
     .filter(Boolean)
     .map((p) => (p.endsWith("/") ? p : `${p}/`));
-  const base: GcsPathKey[] = ["original", "segmentation", "visualization", "reports"];
+  const base: GcsPathKey[] = [
+    "original",
+    "segmentation",
+    "visualization",
+    "alternativeWidth",
+    "reports",
+  ];
   return [...base.map((k) => gcsBlobPrefix(k)), ...normalized];
 }

@@ -1,0 +1,29 @@
+gcs:
+  bucket_name: cv-urban-accessibility-bucket
+  project_id: cv-urban-accessibility
+  image_prefix: streetview/polygon_4v/20260404T133859Z/
+  output_prefix: v3/alternative-width-results/
+
+batch:
+  point_id_min: 258
+  point_id_max: 284
+  directions: ["left", "right"]
+
+model:
+  # If null, uses VGGT_WEIGHTS env var, otherwise Hugging Face fallback.
+  vggt_weights: null
+  device: auto
+  save_overlay: true
+  save_plot3d: true
+  verbose: false
+
+measurement:
+  cam_height: 2.5
+  band_frac: 0.20
+  min_run_px: 15
+  min_valid_cols: 10
+  min_width_m: 0.15
+  max_width_m: 20.0
+  min_sw_frac: 0.02
+  max_phys_width: 5.0
+  max_width_cv: 0.40

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AnalysisResult,
   AnalysisSegment,
+  AlternativeWidthResult,
   Direction,
   FootprintMetadata,
   PointData,
@@ -33,6 +34,7 @@ interface AnalysisPanelProps {
   point: PointData | null;
   direction: Direction | null;
   analysis: AnalysisResult | null;
+  alternativeWidth: AlternativeWidthResult | null;
   loading: boolean;
   onChangeDirection: (direction: Direction) => void;
 }
@@ -338,6 +340,7 @@ export default function AnalysisPanel({
   point,
   direction,
   analysis,
+  alternativeWidth,
   loading,
   onChangeDirection,
 }: AnalysisPanelProps) {
@@ -572,6 +575,52 @@ export default function AnalysisPanel({
                     />
                   </div>
                 )}
+              </div>
+            )}
+
+            {!loading && alternativeWidth && (
+              <div className="mt-4 border-t border-neutral-700/50 pt-4">
+                <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-3">
+                  Alternative Width (Point-Cloud)
+                </h3>
+                <div className="space-y-3">
+                  {alternativeWidth.overlayUrl && (
+                    <div>
+                      <p className="text-[11px] text-neutral-500 mb-1">
+                        2D Overlay
+                      </p>
+                      <ImageViewer
+                        src={alternativeWidth.overlayUrl}
+                        alt="Alternative width overlay"
+                        className="w-full aspect-[16/9]"
+                      />
+                    </div>
+                  )}
+                  {alternativeWidth.scene3dUrl && (
+                    <div>
+                      <p className="text-[11px] text-neutral-500 mb-1">
+                        3D Scene
+                      </p>
+                      <ImageViewer
+                        src={alternativeWidth.scene3dUrl}
+                        alt="Alternative width 3D scene"
+                        className="w-full aspect-[4/3]"
+                      />
+                    </div>
+                  )}
+                  {alternativeWidth.width3dUrl && (
+                    <div>
+                      <p className="text-[11px] text-neutral-500 mb-1">
+                        3D Width Chords
+                      </p>
+                      <ImageViewer
+                        src={alternativeWidth.width3dUrl}
+                        alt="Alternative width 3D chords"
+                        className="w-full aspect-[4/3]"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

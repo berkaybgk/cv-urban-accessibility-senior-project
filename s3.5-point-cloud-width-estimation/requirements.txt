@@ -38,6 +38,8 @@ Pillow>=10.0.0
 huggingface_hub>=0.23.0
 safetensors>=0.4.0
 einops>=0.7.0
+google-cloud-storage>=2.18.0
+PyYAML>=6.0.1
 
 # VGGT package (imports: vggt.models.vggt, vggt.utils.load_fn, ...)
 # If pip cannot clone (no git, corporate proxy, etc.), clone manually and install editable:
