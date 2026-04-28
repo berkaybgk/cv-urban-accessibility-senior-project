@@ -34,6 +34,8 @@ def load_config(path: str | Path | None = None) -> dict[str, Any]:
             "enabled": False,
             "prefix_min": 0,
             "prefix_max": 9999,
+            # Resume: effective min = max(prefix_min, start_prefix) when set.
+            "start_prefix": None,
         },
         "camera": {
             "height_m": 1.8,

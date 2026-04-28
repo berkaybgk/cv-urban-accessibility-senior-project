@@ -32,6 +32,27 @@ def _log(msg: str) -> None:
     print(f"  [PIPE] {msg}")
 
 
+def _is_road_mask_key(key: str) -> bool:
+    """True if mask key is the road class (``{class}_{det_idx}_{mask_idx}`` from GCS layout)."""
+    return key.split("_", 1)[0].lower() == "road"
+
+
+def _obstacle_masks_for_silhouette(
+    assignment_for_sw: list[str],
+    obstacle_masks: dict[str, np.ndarray],
+) -> dict[str, np.ndarray]:
+    """Assigned obstacles plus all road layers (road spans both sidewalks; assignment picks one)."""
+    out = {
+        k: obstacle_masks[k]
+        for k in assignment_for_sw
+        if k in obstacle_masks
+    }
+    for k, m in obstacle_masks.items():
+        if _is_road_mask_key(k):
+            out[k] = m
+    return out
+
+
 def _make_color_palette(n: int) -> dict[int, tuple]:
     import matplotlib.pyplot as plt
     cmap = plt.cm.get_cmap("tab10", max(n, 1))
@@ -106,15 +127,18 @@ def process_street_image(
             k: obstacle_masks[k] for k in assignment.get(sw_key, [])
             if k in obstacle_masks
         }
+        obs_masks_vis = _obstacle_masks_for_silhouette(
+            assignment.get(sw_key, []), obstacle_masks)
+        n_obs_vis = len(obs_masks_vis)
+        palette = _make_color_palette(n_obs_vis)
+        obs_colors_vis = {ot: palette[i] for i, ot in enumerate(obs_masks_vis)}
         n_obs = len(obs_masks)
-        palette = _make_color_palette(n_obs)
-        obs_colors = {ot: palette[i] for i, ot in enumerate(obs_masks)}
 
         seg_prefix = f"{output_prefix}/{sw_key}"
         uploads: list[tuple[bytes, str, str]] = []
 
         sil_bytes = render_obstacle_silhouettes(
-            original_image, sw_mask, obs_masks, obs_colors, sw_key)
+            original_image, sw_mask, obs_masks_vis, obs_colors_vis, sw_key)
         uploads.append((sil_bytes, f"{seg_prefix}/obstacle_silhouettes.png", "image/png"))
 
         left_e, right_e, valid_r, extrap_r = find_row_edges(sw_mask)
@@ -157,7 +181,7 @@ def process_street_image(
             )
 
         fp_img_bytes = render_rectified_footprint(
-            sw_rect, obs_full_rect, obs_fp_rect, obs_colors,
+            sw_rect, obs_full_rect, obs_fp_rect, obs_colors_vis,
             obstacle_is_tree, target_w, pad, sw_key)
         uploads.append((fp_img_bytes, f"{seg_prefix}/rectified_footprint.png", "image/png"))
 

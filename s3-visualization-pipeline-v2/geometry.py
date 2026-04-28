@@ -25,8 +25,15 @@ def rectify_sidewalk(
     H, W = image_or_mask.shape[:2]
 
     valid_widths = right_edges[valid_rows] - left_edges[valid_rows]
+    if valid_widths.size == 0 or not np.all(np.isfinite(valid_widths)):
+        return None
     if target_width is None:
-        target_width = int(np.median(valid_widths))
+        tw = float(np.median(valid_widths))
+        if not np.isfinite(tw) or tw < 1.0:
+            return None
+        target_width = int(max(1, round(tw)))
+    elif target_width < 1:
+        return None
 
     valid_idx = np.where(valid_rows)[0]
     all_rows = np.arange(H)
@@ -57,12 +64,19 @@ def rectify_sidewalk(
 
     cum_real = np.cumsum(row_scale)
     cum_real -= cum_real[0]
-    out_height = int(np.ceil(cum_real[-1])) + 1
+    cr_last = float(cum_real[-1])
+    if not np.isfinite(cr_last) or cr_last < 0:
+        return None
+    out_height = int(np.ceil(cr_last)) + 1
+    if out_height < 1:
+        return None
     out_rows = np.arange(out_height, dtype=np.float32)
     src_row_for_out = np.interp(out_rows, cum_real, np.arange(H, dtype=np.float32))
 
-    padding = int(target_width * 0.3)
+    padding = max(0, int(target_width * 0.3))
     out_width = target_width + 2 * padding
+    if out_width < 1:
+        return None
 
     map_x = np.zeros((out_height, out_width), dtype=np.float32)
     map_y = np.zeros((out_height, out_width), dtype=np.float32)

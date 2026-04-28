@@ -9,6 +9,7 @@ filename parsing, optional manifest for junction vs street.
 Usage
 ─────
   python main.py --config config.yaml
+  python main.py --config config.yaml --start-prefix 80   # resume from numeric prefix ≥ 80
   python main.py --image <blob_path>
 """
 
@@ -164,13 +165,20 @@ def run_batch(cfg: dict[str, Any]) -> None:
     masks_prefix = gcs_cfg["masks_prefix"].rstrip("/")
     output_prefix = gcs_cfg["output_prefix"].rstrip("/")
     pmin, pmax = batch_cfg["prefix_min"], batch_cfg["prefix_max"]
+    start_p = batch_cfg.get("start_prefix")
+    if start_p is not None:
+        pmin = max(int(pmin), int(start_p))
     local_out = cfg.get("local_output_dir")
 
     _banner("Sidewalk Analysis Pipeline v2 -- Batch Mode")
     _info(f"Image prefix  : {image_prefix}")
     _info(f"Masks prefix  : {masks_prefix}")
     _info(f"Output prefix : {output_prefix}")
-    _info(f"Prefix range  : {pmin} - {pmax}")
+    if batch_cfg.get("start_prefix") is not None:
+        _info(f"Prefix range  : {pmin} - {pmax} "
+              f"(start_prefix={batch_cfg['start_prefix']} → effective min {pmin})")
+    else:
+        _info(f"Prefix range  : {pmin} - {pmax}")
 
     manifest = _load_manifest(gcs, gcs_cfg.get("manifest_blob", ""))
 
@@ -280,6 +288,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Process a single image blob path (overrides batch)")
     p.add_argument("--output-dir", type=str, default=None,
                    help="Also save results locally to this directory")
+    p.add_argument("--start-prefix", type=int, default=None,
+                   metavar="N",
+                   help="Resume batch: only process images with numeric filename prefix >= max(prefix_min, N). Overrides batch.start_prefix.")
     return p
 
 
@@ -293,6 +304,8 @@ def main():
 
     if args.output_dir:
         cfg["local_output_dir"] = args.output_dir
+    if args.start_prefix is not None:
+        cfg.setdefault("batch", {})["start_prefix"] = args.start_prefix
 
     if args.image:
         gcs_cfg = cfg["gcs"]

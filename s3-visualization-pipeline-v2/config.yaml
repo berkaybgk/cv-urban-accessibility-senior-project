@@ -13,6 +13,8 @@ batch:
   enabled: true
   prefix_min: 0
   prefix_max: 142
+  # Resume after a stop: only images with leading numeric prefix >= max(prefix_min, start_prefix). Omit or null = full range.
+  start_prefix: 017
 
 camera:
   height_m: 2

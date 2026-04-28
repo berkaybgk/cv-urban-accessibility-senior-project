@@ -31,12 +31,16 @@ DEFAULT_SAMPLE_INTERVAL_M = 30
 SV_SIZE = "640x640"
 SV_FOV = 90
 SV_PITCH = -10
+SV_PITCH_SIDEWAYS = -40
 
 STREETVIEW_URL = "https://maps.googleapis.com/maps/api/streetview"
 STREETVIEW_META_URL = "https://maps.googleapis.com/maps/api/streetview/metadata"
 
-# 2 camera headings per sample point (label, offset from street bearing)
-CAMERA_DIRECTIONS: list[tuple[str, int]] = [
-    ("forward",  0),
-    ("backward", 180),
+# 4 camera views per sample point: (label, heading_offset, pitch)
+# forward/backward use the default pitch; left/right look down at -40°
+CAMERA_DIRECTIONS: list[tuple[str, int, int]] = [
+    ("forward",  0,    SV_PITCH),
+    ("backward", 180,  SV_PITCH),
+    ("left",     -90,  SV_PITCH_SIDEWAYS),
+    ("right",    90,   SV_PITCH_SIDEWAYS),
 ]
