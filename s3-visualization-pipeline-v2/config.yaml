@@ -1,0 +1,36 @@
+# Sidewalk visualization pipeline v2 — config aligned with v1 (pinhole width, same sections).
+
+gcs:
+  bucket_name: cv-urban-accessibility-bucket
+  project_id: cv-urban-accessibility
+  image_prefix: streetview/polygon_4v/20260329T023321Z-BAGDAT-30m/
+  masks_prefix: v2/segmentation-results/
+  output_prefix: v2/analysis-results/
+  # Optional: sampler manifest on GCS for point_type (junction vs street). Empty = treat as street.
+  manifest_blob: ""
+
+batch:
+  enabled: true
+  prefix_min: 0
+  prefix_max: 142
+  # Resume after a stop: only images with leading numeric prefix >= max(prefix_min, start_prefix). Omit or null = full range.
+  start_prefix: 017
+
+camera:
+  height_m: 2
+  hfov_deg: 90
+  pitch_deg: -10
+
+footprint:
+  obstacle_is_tree: ["tree"]
+  base_scan_ratio: 0.15
+  trunk_scan_ratio: 0.40
+  aspect_ratio: 1.0
+  max_height_px: 25
+
+width_estimation:
+  min_horizon_dist: 20
+  exclude_extrapolated: true
+  iqr_factor: 1.5
+
+local_output_dir: null

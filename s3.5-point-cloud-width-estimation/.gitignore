@@ -1,0 +1,5 @@
+# Local VGGT weights (download model.pt into weights/ — do not commit)
+weights/*.pt
+weights/*.pth
+weights/*.bin
+weights/*.safetensors

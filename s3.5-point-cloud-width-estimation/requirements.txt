@@ -1,0 +1,49 @@
+# Sidewalk width pipeline: evaluate_sidewalk.py (VGGT + SegFormer).
+#
+# Setup:
+#   cd s3.5-point-cloud-width-estimation
+#   python3 -m venv .venv
+#   source .venv/bin/activate   # Windows: .venv\Scripts\activate
+#
+# If you use NVIDIA CUDA, install PyTorch *first* with the wheel index from
+# https://pytorch.org (then pip will skip reinstalling torch if satisfied):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#
+# Then install the rest:
+#   pip install -r requirements.txt
+#
+# VGGT is installed from the official repo (same API as in the paper README):
+# https://github.com/facebookresearch/vggt
+#
+# Apple Silicon (M1/M2/M3): PyPI torch includes MPS; the script uses --device auto
+# (CUDA if present, else MPS, else CPU). Put a manually downloaded VGGT checkpoint at
+#   weights/model.pt
+# and run with:
+#   export VGGT_WEIGHTS="$PWD/weights/model.pt"
+#   python evaluate_sidewalk.py --img_dir ... --gt_csv ...
+# SegFormer weights still load from Hugging Face on first run unless you cache them.
+
+# Core DL (CPU wheels from PyPI; replace with CUDA index URL if you use a GPU)
+torch>=2.3.1
+torchvision>=0.18.1
+
+# Script + SegFormer
+numpy>=1.26,<2
+opencv-python>=4.8.0
+matplotlib>=3.8.0
+tqdm>=4.66.0
+transformers>=4.40.0
+accelerate>=0.27.0
+Pillow>=10.0.0
+huggingface_hub>=0.23.0
+safetensors>=0.4.0
+einops>=0.7.0
+google-cloud-storage>=2.18.0
+PyYAML>=6.0.1
+
+# VGGT package (imports: vggt.models.vggt, vggt.utils.load_fn, ...)
+# If pip cannot clone (no git, corporate proxy, etc.), clone manually and install editable:
+#   git clone https://github.com/facebookresearch/vggt.git ../vggt
+#   pip install -e ../vggt
+#   (then remove or comment out the line below)
+vggt @ git+https://github.com/facebookresearch/vggt.git

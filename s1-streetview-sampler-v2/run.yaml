@@ -1,0 +1,35 @@
+# ── Street View Sampling v2.1 – Run Configuration ───────────────────────────
+#
+# Each job defines a polygon area to sample.
+# Run with:  python main.py run.yaml
+#
+# A single job is a YAML mapping.  Multiple jobs are a YAML list of mappings.
+#
+# Required keys:
+#   vertices    : list of [lat, lon] pairs (>= 3)
+#
+# Optional keys:
+#   interval      : metres between sample points  (default: 15)
+#   network_type  : OSM network type               (default: all_public)
+#
+# Pipeline behaviour:
+#   1. Points are sampled along streets, then Street View metadata is
+#      resolved for each.
+#   2. Points are reordered via greedy nearest-neighbour so consecutive
+#      points are as close as possible, and duplicate pano IDs are removed.
+#   3. For each unique panorama, 4 images are fetched:
+#        forward  (bearing +0°,   pitch -10°)
+#        backward (bearing +180°, pitch -10°)
+#        left     (bearing -90°,  pitch -40°)
+#        right    (bearing +90°,  pitch -40°)
+#
+# ── Your job(s) below ────────────────────────────────────────────────────────
+
+vertices:
+  - [40.972521, 29.061285]
+  - [40.966326, 29.071995]
+  - [40.969629, 29.072653]
+  - [40.974638, 29.063173]
+
+interval: 5
+network_type: drive
