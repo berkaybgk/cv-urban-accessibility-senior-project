@@ -29,14 +29,19 @@ class RobustHorizonRectifier:
         b = ransac.estimator_.intercept_
         return a, b
 
-    def process_tile(self, image: np.ndarray, good_mask: np.ndarray, bad_mask: np.ndarray, 
-                     f_px: float, camera_height_m: float = 2.5, 
-                     pixels_per_meter: float = 40.0, z_max_m: float = 30.0):
-        
+    def build_warp(self, good_mask: np.ndarray, bad_mask: np.ndarray,
+                   f_px: float, camera_height_m: float = 2.5,
+                   pixels_per_meter: float = 40.0, z_max_m: float = 30.0,
+                   max_output_width: int | None = None,
+                   output_order: str = 'near_to_far') -> dict:
+        """Build a reusable remap warp from the robust horizon/boundary estimate."""
+        if output_order not in {'near_to_far', 'far_to_near'}:
+            return {'ok': False, 'reason': f'unknown output_order: {output_order}'}
+
         # --- Step 1: Find the "Good Line" ---
         a_good, b_good = self._fit_2_point_ransac(good_mask)
         if a_good is None:
-            return image.copy(), None 
+            return {'ok': False, 'reason': 'could not fit good boundary'}
 
         # --- Step 2: Probe the Local Horizon ---
         a_probe, b_probe = self._fit_2_point_ransac(bad_mask)
@@ -91,6 +96,14 @@ class RobustHorizonRectifier:
         else:
             a_bad, b_bad = a_probe, b_probe
 
+        if a_bad is None:
+            return {
+                'ok': False,
+                'reason': 'could not fit bad boundary',
+                'final_vy': float(self.global_vy),
+                'local_vy': None if local_vy is None else float(local_vy),
+            }
+
         # --- Step 6: Pinhole Unrolling (The Render) ---
         bottom_y = self.H - 1
         dy_bottom = max(1.0, float(bottom_y - self.global_vy)) 
@@ -98,13 +111,21 @@ class RobustHorizonRectifier:
         z_min = (f_px * camera_height_m) / dy_bottom
         
         if z_min >= z_max_m:
-            return image.copy(), self.global_vy
+            return {
+                'ok': False,
+                'reason': f'z_min >= z_max_m ({z_min:.2f} >= {z_max_m:.2f})',
+                'final_vy': float(self.global_vy),
+                'local_vy': None if local_vy is None else float(local_vy),
+                'vx': float(vx),
+            }
             
         physical_length_m = z_max_m - z_min
         out_height = int(np.ceil(physical_length_m * pixels_per_meter))
         out_height = min(out_height, 3000) 
         
         z_out = np.linspace(z_min, z_max_m, out_height)
+        if output_order == 'far_to_near':
+            z_out = z_out[::-1]
         
         src_y = self.global_vy + (f_px * camera_height_m) / z_out
         src_y = np.clip(src_y, 0, self.H - 1).astype(np.float32)
@@ -117,6 +138,15 @@ class RobustHorizonRectifier:
         
         target_width = int(np.max(right_bound - left_bound))
         target_width = max(target_width, 100) 
+        if max_output_width is not None and target_width > max_output_width:
+            return {
+                'ok': False,
+                'reason': f'output width too large ({target_width} > {max_output_width})',
+                'final_vy': float(self.global_vy),
+                'local_vy': None if local_vy is None else float(local_vy),
+                'vx': float(vx),
+                'target_width': int(target_width),
+            }
         
         map_y = np.repeat(src_y[:, None], target_width, axis=1)
         out_cols = np.arange(target_width, dtype=np.float32)
@@ -127,18 +157,68 @@ class RobustHorizonRectifier:
         scale = src_width / target_width
         map_x = left_bound[:, None] + out_cols[None, :] * scale[:, None]
         map_x = map_x.astype(np.float32)
-        
-        warped = cv2.remap(image, map_x, map_y, cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT)
-        
-        # --- Visualization overlay for the debug plot ---
-        debug_img = image.copy()
-        cv2.circle(debug_img, (int(vx), int(self.global_vy)), 8, (0, 255, 255), -1) # Draw Horizon VP
-        # Draw the locked lines
-        y1, y2 = int(self.global_vy), self.H
-        cv2.line(debug_img, (int(a_good * y1 + b_good), y1), (int(a_good * y2 + b_good), y2), (0, 255, 0), 2)
-        cv2.line(debug_img, (int(a_bad * y1 + b_bad), y1), (int(a_bad * y2 + b_bad), y2), (0, 0, 255), 2)
 
-        return warped, debug_img, self.global_vy
+        return {
+            'ok': True,
+            'reason': 'ok',
+            'map_x': map_x,
+            'map_y': map_y.astype(np.float32),
+            'final_vy': float(self.global_vy),
+            'local_vy': None if local_vy is None else float(local_vy),
+            'vx': float(vx),
+            'a_good': float(a_good),
+            'b_good': float(b_good),
+            'a_bad': float(a_bad),
+            'b_bad': float(b_bad),
+            'target_width': int(target_width),
+            'output_shape': (int(map_y.shape[0]), int(map_y.shape[1])),
+            'output_order': output_order,
+        }
+
+    def remap_with_warp(self, image_or_mask: np.ndarray, warp: dict, is_mask: bool = False,
+                        interpolation: int | None = None):
+        """Apply a warp returned by build_warp to an image or mask."""
+        if not warp.get('ok'):
+            return None
+        flags = cv2.INTER_NEAREST if is_mask else (interpolation or cv2.INTER_CUBIC)
+        inp = image_or_mask.astype(np.uint8) if is_mask else image_or_mask
+        remapped = cv2.remap(inp, warp['map_x'], warp['map_y'], flags, borderMode=cv2.BORDER_CONSTANT)
+        if is_mask:
+            remapped = remapped.astype(bool)
+        return remapped
+
+    def draw_debug(self, image: np.ndarray, warp: dict) -> np.ndarray | None:
+        """Draw the locked VP and robust boundary lines on the source image."""
+        if not warp.get('ok'):
+            return None
+        debug_img = image.copy()
+        vx = warp['vx']
+        final_vy = warp['final_vy']
+        cv2.circle(debug_img, (int(vx), int(final_vy)), 8, (0, 255, 255), -1) # Draw Horizon VP
+        # Draw the locked lines
+        y1, y2 = int(final_vy), self.H
+        cv2.line(debug_img, (int(warp['a_good'] * y1 + warp['b_good']), y1), (int(warp['a_good'] * y2 + warp['b_good']), y2), (0, 255, 0), 2)
+        cv2.line(debug_img, (int(warp['a_bad'] * y1 + warp['b_bad']), y1), (int(warp['a_bad'] * y2 + warp['b_bad']), y2), (0, 0, 255), 2)
+        return debug_img
+
+    def process_tile(self, image: np.ndarray, good_mask: np.ndarray, bad_mask: np.ndarray, 
+                     f_px: float, camera_height_m: float = 2.5, 
+                     pixels_per_meter: float = 40.0, z_max_m: float = 30.0):
+        warp = self.build_warp(
+            good_mask=good_mask,
+            bad_mask=bad_mask,
+            f_px=f_px,
+            camera_height_m=camera_height_m,
+            pixels_per_meter=pixels_per_meter,
+            z_max_m=z_max_m,
+        )
+        if not warp.get('ok'):
+            return image.copy(), None
+
+        warped = self.remap_with_warp(image, warp, is_mask=False)
+        debug_img = self.draw_debug(image, warp)
+
+        return warped, debug_img, warp['final_vy']
 
 # ==========================================
 # TEST HARNESS
