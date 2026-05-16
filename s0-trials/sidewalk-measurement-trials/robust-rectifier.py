@@ -33,10 +33,13 @@ class RobustHorizonRectifier:
                    f_px: float, camera_height_m: float = 2.5,
                    pixels_per_meter: float = 40.0, z_max_m: float = 30.0,
                    max_output_width: int | None = None,
-                   output_order: str = 'near_to_far') -> dict:
+                   output_order: str = 'near_to_far',
+                   output_width: int | None = None) -> dict:
         """Build a reusable remap warp from the robust horizon/boundary estimate."""
         if output_order not in {'near_to_far', 'far_to_near'}:
             return {'ok': False, 'reason': f'unknown output_order: {output_order}'}
+        if output_width is not None and output_width < 1:
+            return {'ok': False, 'reason': f'output_width must be positive, got {output_width}'}
 
         # --- Step 1: Find the "Good Line" ---
         a_good, b_good = self._fit_2_point_ransac(good_mask)
@@ -136,17 +139,19 @@ class RobustHorizonRectifier:
         left_bound = np.minimum(line1_x, line2_x)
         right_bound = np.maximum(line1_x, line2_x)
         
-        target_width = int(np.max(right_bound - left_bound))
-        target_width = max(target_width, 100) 
-        if max_output_width is not None and target_width > max_output_width:
+        natural_target_width = int(np.max(right_bound - left_bound))
+        natural_target_width = max(natural_target_width, 100)
+        if max_output_width is not None and natural_target_width > max_output_width:
             return {
                 'ok': False,
-                'reason': f'output width too large ({target_width} > {max_output_width})',
+                'reason': f'output width too large ({natural_target_width} > {max_output_width})',
                 'final_vy': float(self.global_vy),
                 'local_vy': None if local_vy is None else float(local_vy),
                 'vx': float(vx),
-                'target_width': int(target_width),
+                'target_width': int(natural_target_width),
+                'natural_target_width': int(natural_target_width),
             }
+        target_width = int(output_width) if output_width is not None else natural_target_width
         
         map_y = np.repeat(src_y[:, None], target_width, axis=1)
         out_cols = np.arange(target_width, dtype=np.float32)
@@ -171,6 +176,7 @@ class RobustHorizonRectifier:
             'a_bad': float(a_bad),
             'b_bad': float(b_bad),
             'target_width': int(target_width),
+            'natural_target_width': int(natural_target_width),
             'output_shape': (int(map_y.shape[0]), int(map_y.shape[1])),
             'output_order': output_order,
         }
@@ -203,7 +209,8 @@ class RobustHorizonRectifier:
 
     def process_tile(self, image: np.ndarray, good_mask: np.ndarray, bad_mask: np.ndarray, 
                      f_px: float, camera_height_m: float = 2.5, 
-                     pixels_per_meter: float = 40.0, z_max_m: float = 30.0):
+                     pixels_per_meter: float = 40.0, z_max_m: float = 30.0,
+                     output_width: int | None = None):
         warp = self.build_warp(
             good_mask=good_mask,
             bad_mask=bad_mask,
@@ -211,6 +218,7 @@ class RobustHorizonRectifier:
             camera_height_m=camera_height_m,
             pixels_per_meter=pixels_per_meter,
             z_max_m=z_max_m,
+            output_width=output_width,
         )
         if not warp.get('ok'):
             return image.copy(), None
