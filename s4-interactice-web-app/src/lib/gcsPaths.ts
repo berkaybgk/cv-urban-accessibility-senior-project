@@ -20,6 +20,7 @@ export const gcsPaths = {
   visualization: envPath("GCS_PREFIX_VISUALIZATION", "v3/visualization-results"),
   alternativeWidth: envPath("GCS_PREFIX_ALT_WIDTH", "v3/alternative-width-results"),
   reports: envPath("GCS_PREFIX_REPORTS", "reports"),
+  strips: envPath("GCS_PREFIX_STRIPS", "strips"),
 } as const;
 
 export type GcsPathKey = keyof typeof gcsPaths;
@@ -47,6 +48,7 @@ export function gcsAllowedBlobPrefixes(): string[] {
     "visualization",
     "alternativeWidth",
     "reports",
+    "strips",
   ];
   return [...base.map((k) => gcsBlobPrefix(k)), ...normalized];
 }

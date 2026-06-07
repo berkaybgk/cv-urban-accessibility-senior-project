@@ -65,6 +65,41 @@ export interface WidthMetadata {
   rows_used: number;
 }
 
+// --- Strip builder ---
+
+/** One boundary line, represented by its two on-band handle points. */
+export interface StripEdgeHandle {
+  xTop: number;
+  yTop: number;
+  xBottom: number;
+  yBottom: number;
+}
+
+export interface StripEdgeLines {
+  left: StripEdgeHandle;
+  right: StripEdgeHandle;
+}
+
+export interface StripTilePreview {
+  tileId: string;
+  side: string;
+  pointId: string;
+  direction: Direction;
+  selectedSide: string;
+  method: string;
+  frame?: { w: number; h: number };
+  previewPng?: string; // base64 PNG of the raw frame
+  previewOverlayPng?: string; // base64 PNG with auto lines drawn
+  lines?: StripEdgeLines;
+  error?: string;
+}
+
+export interface StripEdgesResult {
+  order: string[];
+  orderedPoints: string[];
+  tiles: StripTilePreview[];
+}
+
 export interface FootprintMetadata {
   segment: string;
   rectified_height: number;

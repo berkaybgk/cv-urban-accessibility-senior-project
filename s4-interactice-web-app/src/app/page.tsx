@@ -12,6 +12,7 @@ import type {
 import type { MapViewHandle } from "@/components/MapView";
 import AnalysisPanel from "@/components/AnalysisPanel";
 import PointSearch from "@/components/PointSearch";
+import StripBuilder from "@/components/StripBuilder";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -72,6 +73,10 @@ export default function HomePage() {
     useState<AlternativeWidthResult | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
+
+  const [stripMode, setStripMode] = useState(false);
+  const [stripSelectedIds, setStripSelectedIds] = useState<string[]>([]);
+  const [stripBuilderOpen, setStripBuilderOpen] = useState(false);
 
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -145,6 +150,22 @@ export default function HomePage() {
     mapViewRef.current?.flyToPoint(point);
   }, []);
 
+  const handleToggleStripPoint = useCallback((pointId: string) => {
+    setStripSelectedIds((prev) =>
+      prev.includes(pointId) ? prev.filter((id) => id !== pointId) : [...prev, pointId]
+    );
+  }, []);
+
+  const toggleStripMode = useCallback(() => {
+    setStripMode((on) => {
+      const next = !on;
+      if (next) {
+        setPanelOpen(false);
+      }
+      return next;
+    });
+  }, []);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-neutral-900">
@@ -174,6 +195,9 @@ export default function HomePage() {
         points={points}
         onSelectDirection={handleSelectDirection}
         selectedPointId={selectedPoint?.pointId ?? null}
+        stripMode={stripMode}
+        stripSelectedIds={stripSelectedIds}
+        onToggleStripPoint={handleToggleStripPoint}
       />
 
       {/* Top bar: title + search */}
@@ -195,7 +219,68 @@ export default function HomePage() {
           onSelectPoint={handleSearchSelect}
           onSelectDirection={handleSelectDirection}
         />
+
+        <button
+          onClick={toggleStripMode}
+          className={`rounded-lg border px-4 py-2 text-sm font-medium backdrop-blur-sm transition-colors ${
+            stripMode
+              ? "border-cyan-500/60 bg-cyan-600/80 text-white"
+              : "border-neutral-700/50 bg-neutral-900/80 text-neutral-200 hover:text-white"
+          }`}
+          title="Pick points to merge into a continuous strip"
+        >
+          {stripMode ? "Strip mode: ON" : "Strip mode"}
+        </button>
       </div>
+
+      {/* Strip selection panel */}
+      {stripMode && (
+        <div className="absolute right-4 top-4 z-20 w-64 rounded-lg border border-neutral-700/60 bg-neutral-900/90 p-3 text-neutral-100 backdrop-blur-sm">
+          <div className="mb-2 text-sm font-semibold">Strip points</div>
+          <p className="mb-2 text-xs text-neutral-400">
+            Click map dots to add/remove. Order is auto-derived from street direction.
+          </p>
+          {stripSelectedIds.length === 0 ? (
+            <p className="text-xs text-neutral-500">No points selected yet.</p>
+          ) : (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {stripSelectedIds.map((id) => (
+                <button
+                  key={id}
+                  onClick={() => handleToggleStripPoint(id)}
+                  className="rounded-md bg-cyan-700/60 px-2 py-1 text-xs hover:bg-red-700/60"
+                  title="Remove"
+                >
+                  {id} ✕
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setStripBuilderOpen(true)}
+              disabled={stripSelectedIds.length < 2}
+              className="flex-1 rounded-md bg-cyan-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-cyan-500 disabled:opacity-40"
+            >
+              Merge them into a strip
+            </button>
+            {stripSelectedIds.length > 0 && (
+              <button
+                onClick={() => setStripSelectedIds([])}
+                className="rounded-md border border-neutral-700 px-2 py-1.5 text-xs hover:bg-neutral-800"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <StripBuilder
+        open={stripBuilderOpen}
+        pointIds={stripSelectedIds}
+        onClose={() => setStripBuilderOpen(false)}
+      />
 
       <AnalysisPanel
         open={panelOpen}
