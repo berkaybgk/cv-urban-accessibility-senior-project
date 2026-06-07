@@ -20,6 +20,10 @@ from dotenv import load_dotenv
 # -----------------------------------------------------------------------------
 RECTIFY_INTERPOLATION = cv2.INTER_CUBIC
 DEPTH_RATIO = 1.6
+# Along-walk resolution multiplier for left/right side-view tiles. 1.0 = original
+# (out_height == source image width); >1 resamples finer, <1 coarser. Pure
+# resolution knob (no metric meaning), analogous to pixels_per_meter for road tiles.
+SIDE_ALONG_WALK_SCALE = 4.0
 HFOV_DEG = 90
 LABEL_BAR_HEIGHT = 54
 WARNING_TILE_HEIGHT = 180
@@ -40,7 +44,7 @@ ROAD_CONFIRMED_WEIGHT = 5.0
 # Robust horizon rectifier for road-facing forward/backward tiles.
 USE_ROBUST_RECTIFIER = True
 ROBUST_CAMERA_HEIGHT_M = 2.5
-ROBUST_PIXELS_PER_METER = 40.0
+ROBUST_PIXELS_PER_METER = 213.0
 ROBUST_Z_MAX_M = 30.0
 ROBUST_BOUNDARY_THICKNESS_PX = 3
 ROBUST_MIN_MASK_AREA = 1500

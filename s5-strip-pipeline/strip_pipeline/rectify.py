@@ -18,6 +18,7 @@ from sklearn.linear_model import LinearRegression, RANSACRegressor
 from .config import (
     BORDER_MARGIN,
     DEPTH_RATIO,
+    SIDE_ALONG_WALK_SCALE,
     HFOV_DEG,
     RANSAC_MIN_SAMPLES,
     RANSAC_RESIDUAL_THRESHOLD,
@@ -342,7 +343,8 @@ def rectify_side_datadriven_fan(image, single_mask, direction: str, target_width
                                    + edge_override["b_R"] - edge_override["b_L"])) or 100
 
     out_width = target_width
-    out_height = H_rot
+    along_scale = max(1e-6, float(SIDE_ALONG_WALK_SCALE))
+    out_height = max(1, int(round(H_rot * along_scale)))
     padding = 0
     if edge_override is not None:
         a_L, b_L = edge_override["a_L"], edge_override["b_L"]
@@ -362,7 +364,9 @@ def rectify_side_datadriven_fan(image, single_mask, direction: str, target_width
     stretch_factor = 1.0 + (depth_ratio - 1.0) * depth_norm
 
     cy_rot = H_rot / 2.0
-    src_y = cy_rot + (out_y_grid - cy_rot) * stretch_factor
+    # out_y_grid spans the (possibly upsampled) out_height; divide by along_scale to
+    # map back into source rows so scale=1.0 reproduces the original mapping exactly.
+    src_y = cy_rot + (out_y_grid / along_scale - cy_rot) * stretch_factor
     L = a_L * src_y + b_L
     R = a_R * src_y + b_R
     src_x = L + x_norm * (R - L)
