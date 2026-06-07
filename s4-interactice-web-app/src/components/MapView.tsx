@@ -62,6 +62,9 @@ interface MapViewProps {
   points: PointsHashMap;
   onSelectDirection: (point: PointData, direction: Direction) => void;
   selectedPointId: string | null;
+  stripMode?: boolean;
+  stripSelectedIds?: string[];
+  onToggleStripPoint?: (pointId: string) => void;
 }
 
 function buildGeoJSON(points: PointsHashMap) {
@@ -140,7 +143,7 @@ function StyleSwitcher({
 }
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
-  { points, onSelectDirection, selectedPointId },
+  { points, onSelectDirection, selectedPointId, stripMode = false, stripSelectedIds = [], onToggleStripPoint },
   ref
 ) {
   const mapRef = useRef<MapRef>(null);
@@ -171,14 +174,18 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     (e: MapLayerMouseEvent) => {
       const feature = e.features?.[0];
       if (!feature || !feature.properties) {
-        setPopupPoint(null);
+        if (!stripMode) setPopupPoint(null);
         return;
       }
       const pid = feature.properties.pointId as string;
+      if (stripMode) {
+        onToggleStripPoint?.(pid);
+        return;
+      }
       const pt = points[pid];
       if (pt) setPopupPoint(pt);
     },
-    [points]
+    [points, stripMode, onToggleStripPoint]
   );
 
   const handleMouseEnter = useCallback(() => {
@@ -215,19 +222,28 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               "interpolate",
               ["linear"],
               ["zoom"],
-              12, 3,
-              15, 6,
-              18, 10,
+              12, ["case", ["in", ["get", "pointId"], ["literal", stripSelectedIds]], 5, 3],
+              15, ["case", ["in", ["get", "pointId"], ["literal", stripSelectedIds]], 9, 6],
+              18, ["case", ["in", ["get", "pointId"], ["literal", stripSelectedIds]], 13, 10],
             ],
             "circle-color": [
               "case",
+              ["in", ["get", "pointId"], ["literal", stripSelectedIds]],
+              "#22d3ee",
               ["==", ["get", "pointId"], selectedPointId ?? ""],
               "#a855f7",
               "#f97316",
             ],
-            "circle-stroke-width": 1.5,
+            "circle-stroke-width": [
+              "case",
+              ["in", ["get", "pointId"], ["literal", stripSelectedIds]],
+              2.5,
+              1.5,
+            ],
             "circle-stroke-color": [
               "case",
+              ["in", ["get", "pointId"], ["literal", stripSelectedIds]],
+              "#cffafe",
               ["==", ["get", "pointId"], selectedPointId ?? ""],
               "#e9d5ff",
               isDarkStyle ? "#7c2d12" : "#fed7aa",

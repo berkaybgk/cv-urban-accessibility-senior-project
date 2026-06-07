@@ -1,0 +1,2 @@
+point_id,direction,status,reason,width_m,z_wall_m,z_curb_m,y_wall_px,y_curb_px,image_height_px,fov_deg,pitch_deg,cam_height_m,image_blob,mask_blob,processed_utc
+0011,right,ok,ok,2.1127,5.1720,3.0593,250.80,327.01,640,90.0,-38.0,2.5,streetview/polygon_4v/20260516T081917Z/006-0011_right_41.086511_29.0431773_76.2.jpg,v4-20260516T081917Z/segmentation-results/0011_41.086511_29.0431773/right/sidewalk/mask_000.png,2026-06-03T07:55:02.130043+00:00
