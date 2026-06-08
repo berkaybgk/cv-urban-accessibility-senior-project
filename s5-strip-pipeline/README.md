@@ -36,7 +36,7 @@ GCS credentials + bucket come from the repo-level `.env` (`GCP_PROJECT_ID`,
 ## Run the service
 
 ```bash
-uvicorn service:app --port 8000
+python -m uvicorn service:app --port 8000
 ```
 
 Point the web app at it with `STRIP_SERVICE_URL=http://localhost:8000`.

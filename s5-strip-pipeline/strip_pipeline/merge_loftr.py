@@ -31,7 +31,7 @@ SIDE_VIEW_PAIR_KEEP_PERCENT = int(round(SIDE_VIEW_PAIR_KEEP_RATIO * 100))
 ROAD_SIDE_PAIR_KEEP_PERCENT = int(round(ROAD_SIDE_PAIR_KEEP_RATIO * 100))
 ROAD_ROAD_PAIR_KEEP_PERCENT = int(round(ROAD_ROAD_PAIR_KEEP_RATIO * 100))
 FALLBACK_GAP_PX = ROBUST_PIXELS_PER_METER / 2
-MIN_SEAM_SLICE_HEIGHT_PX = 8
+MIN_SEAM_SLICE_HEIGHT_PX = -40
 
 _matcher = None
 _device = None
@@ -154,6 +154,9 @@ def match_adjacent_tiles(a: TileResult, b: TileResult) -> dict[str, Any]:
         "offset_y": -float(b.clean_image.shape[0] + FALLBACK_GAP_PX) if b.clean_image is not None else 0.0,
         "pA": None,
         "pB": None,
+        "all_pA": [],
+        "all_pB": [],
+        "all_conf": [],
         "message": "",
     }
 
@@ -201,9 +204,20 @@ def match_adjacent_tiles(a: TileResult, b: TileResult) -> dict[str, Any]:
         base["message"] = "no valid inlier matches"
         return base
 
-    best_idx = int(np.argmax(p_c))
-    full_a = p_a[best_idx] + off_a
-    full_b = p_b[best_idx] + off_b
+    # Convert crops to full image coordinates
+    all_full_a = p_a + off_a
+    all_full_b = p_b + off_b
+
+    # Compute median consensus translation vector
+    deltas = all_full_a - all_full_b  # shape (N, 2)
+    median_delta = np.median(deltas, axis=0)
+
+    # Select the keypoint pair closest to the median consensus delta
+    distances = np.linalg.norm(deltas - median_delta, axis=1)
+    best_idx = int(np.argmin(distances))
+
+    full_a = all_full_a[best_idx]
+    full_b = all_full_b[best_idx]
     delta = full_a - full_b
 
     base.update({
@@ -214,6 +228,9 @@ def match_adjacent_tiles(a: TileResult, b: TileResult) -> dict[str, Any]:
         "offset_y": float(delta[1]),
         "pA": full_a.astype(float),
         "pB": full_b.astype(float),
+        "all_pA": all_full_a.astype(float).tolist(),
+        "all_pB": all_full_b.astype(float).tolist(),
+        "all_conf": p_c.astype(float).tolist(),
         "message": "ok",
     })
     return base
@@ -276,20 +293,34 @@ def build_seam_cuts(tiles: list[TileResult], logs: list[dict[str, Any]]) -> tupl
         log["seam_y_below"] = y_below if y_below is not None else ""
         log["seam_y_above"] = y_above if y_above is not None else ""
 
-        valid = y_below is not None and y_above is not None
-        if valid:
+        reasons = []
+        if y_below is None:
+            reasons.append("y_below is None")
+        if y_above is None:
+            reasons.append("y_above is None")
+
+        if y_below is not None and y_above is not None:
             below_visible_start, below_visible_end, _ = visible_bounds[idx]
             above_visible_start, above_visible_end, _ = visible_bounds[idx + 1]
-            valid = below_visible_start <= y_below <= below_visible_end and above_visible_start <= y_above <= above_visible_end
-        if valid:
-            below_slice_h = ends[idx] - y_below
-            above_slice_h = y_above - starts[idx + 1]
-            valid = below_slice_h >= MIN_SEAM_SLICE_HEIGHT_PX and above_slice_h >= MIN_SEAM_SLICE_HEIGHT_PX
 
+            if not (below_visible_start <= y_below <= below_visible_end):
+                reasons.append(f"y_below={y_below} not in visible bounds [{below_visible_start}, {below_visible_end}]")
+            if not (above_visible_start <= y_above <= above_visible_end):
+                reasons.append(f"y_above={y_above} not in visible bounds [{above_visible_start}, {above_visible_end}]")
+
+            if not reasons:
+                below_slice_h = ends[idx] - y_below
+                above_slice_h = y_above - starts[idx + 1]
+                if below_slice_h < MIN_SEAM_SLICE_HEIGHT_PX:
+                    reasons.append(f"below_slice_h={below_slice_h} < MIN={MIN_SEAM_SLICE_HEIGHT_PX}")
+                if above_slice_h < MIN_SEAM_SLICE_HEIGHT_PX:
+                    reasons.append(f"above_slice_h={above_slice_h} < MIN={MIN_SEAM_SLICE_HEIGHT_PX}")
+
+        valid = len(reasons) == 0
         if not valid:
             log["status"] = "invalid-seam-fallback"
             log["offset_y"] = _fallback_pair_offset(above)
-            log["message"] = "matched seam would create an invalid/tiny slice; using natural boundary"
+            log["message"] = f"invalid seam: {'; '.join(reasons)}"
             continue
 
         starts[idx] = y_below
@@ -463,8 +494,42 @@ def make_full_tile_loftr_debug_strip(side: str, tiles_bottom_to_top: list[TileRe
 
         below_tile = below_item["tile"]
         above_tile = above_item["tile"]
-        p_below_raw = _as_int_point(log.get("pA"), below_tile.clean_image.shape)
-        p_above_raw = _as_int_point(log.get("pB"), above_tile.clean_image.shape)
+
+        all_pA = log.get("all_pA", [])
+        all_pB = log.get("all_pB", [])
+        best_pA = log.get("pA")
+        best_pB = log.get("pB")
+
+        cyan = (0, 255, 255)  # Cyan in RGB
+
+        # Draw all candidate (inlier) matches first in cyan
+        for i in range(len(all_pA)):
+            pA_i = np.array(all_pA[i])
+            pB_i = np.array(all_pB[i])
+
+            # Skip drawing candidate if it is the best match
+            if best_pA is not None and best_pB is not None:
+                if np.allclose(pA_i, best_pA) and np.allclose(pB_i, best_pB):
+                    continue
+
+            p_below_raw_i = _as_int_point(pA_i, below_tile.clean_image.shape)
+            p_above_raw_i = _as_int_point(pB_i, above_tile.clean_image.shape)
+            if p_below_raw_i is None or p_above_raw_i is None:
+                continue
+            p_below_i = _point_on_normalized_canvas(p_below_raw_i, below_tile.clean_image.shape, canvas_width)
+            p_above_i = _point_on_normalized_canvas(p_above_raw_i, above_tile.clean_image.shape, canvas_width)
+            if p_below_i is None or p_above_i is None:
+                continue
+
+            x1_i, y1_i = p_above_i[0], above_item["y_out"] + p_above_i[1]
+            x2_i, y2_i = p_below_i[0], below_item["y_out"] + p_below_i[1]
+            cv2.line(strip, (x1_i, y1_i), (x2_i, y2_i), cyan, 1, cv2.LINE_AA)
+            cv2.circle(strip, (x1_i, y1_i), 3, cyan, -1, cv2.LINE_AA)
+            cv2.circle(strip, (x2_i, y2_i), 3, cyan, -1, cv2.LINE_AA)
+
+        # Draw the chosen best match in bold red
+        p_below_raw = _as_int_point(best_pA, below_tile.clean_image.shape)
+        p_above_raw = _as_int_point(best_pB, above_tile.clean_image.shape)
         if p_below_raw is None or p_above_raw is None:
             continue
         p_below = _point_on_normalized_canvas(p_below_raw, below_tile.clean_image.shape, canvas_width)
