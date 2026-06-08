@@ -26,9 +26,11 @@ import {
   SCORE_COLORS,
   SCORE_THRESHOLDS,
   SCORE_LEGEND,
+  METRIC_LABELS,
   bboxOf,
   segmentInPolygon,
   type LngLat,
+  type ScoreMetric,
 } from "@/lib/geo";
 
 const DIRECTION_LABELS: Record<Direction, string> = {
@@ -90,27 +92,36 @@ interface MapViewProps {
   areaPoints?: LngLat[];
   segments?: ScoredSegmentCollection | null;
   onAddAreaPoint?: (lngLat: LngLat) => void;
+  metric?: ScoreMetric;
 }
 
-const SEGMENT_COLOR_EXPR = [
-  "step",
-  ["get", "score"],
-  SCORE_COLORS.red,
-  SCORE_THRESHOLDS.low,
-  SCORE_COLORS.yellow,
-  SCORE_THRESHOLDS.high,
-  SCORE_COLORS.green,
-] as const;
+/**
+ * MapLibre `step` expression coloring each segment by the chosen metric.
+ * Falls back to the generic `score` field for files that predate the two-score
+ * format (e.g. single-metric exports).
+ */
+function segmentColorExpr(metric: ScoreMetric) {
+  return [
+    "step",
+    ["coalesce", ["get", metric], ["get", "score"], 0],
+    SCORE_COLORS.red,
+    SCORE_THRESHOLDS.low,
+    SCORE_COLORS.yellow,
+    SCORE_THRESHOLDS.high,
+    SCORE_COLORS.green,
+  ] as const;
+}
 
 const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
 
-/** Draw the score legend onto an export canvas (bottom-left). */
-function drawLegend(ctx: CanvasRenderingContext2D, height: number) {
+/** Draw the score legend (with a metric title) onto an export canvas (bottom-left). */
+function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string) {
   const pad = 10;
+  const titleH = 20;
   const rowH = 20;
   const swatch = 12;
-  const boxW = 168;
-  const boxH = pad * 2 + SCORE_LEGEND.length * rowH;
+  const boxW = 180;
+  const boxH = pad * 2 + titleH + SCORE_LEGEND.length * rowH;
   const x = pad;
   const y = height - boxH - pad;
 
@@ -120,10 +131,14 @@ function drawLegend(ctx: CanvasRenderingContext2D, height: number) {
   ctx.fillRect(x, y, boxW, boxH);
   ctx.strokeRect(x, y, boxW, boxH);
 
-  ctx.font = "12px sans-serif";
   ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText(title, x + pad, y + pad + titleH / 2);
+
+  ctx.font = "12px sans-serif";
   SCORE_LEGEND.forEach((b, i) => {
-    const ry = y + pad + i * rowH + rowH / 2;
+    const ry = y + pad + titleH + i * rowH + rowH / 2;
     ctx.fillStyle = b.color;
     ctx.fillRect(x + pad, ry - swatch / 2, swatch, swatch);
     ctx.fillStyle = "#ffffff";
@@ -218,6 +233,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     areaPoints = [],
     segments = null,
     onAddAreaPoint,
+    metric = "walkability_score",
   },
   ref
 ) {
@@ -230,6 +246,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     MAP_STYLES.find((s) => s.id === styleId)?.url ?? MAP_STYLES[0].url;
 
   const isDarkStyle = styleId === "dark";
+
+  const colorExpr = useMemo(() => segmentColorExpr(metric), [metric]);
 
   // Segments to color: all of them until an area is drawn, then only those inside.
   const segmentsFC = useMemo(() => {
@@ -325,7 +343,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         const ctx = out.getContext("2d");
         if (!ctx) throw new Error("Could not create export canvas.");
         ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-        drawLegend(ctx, out.height);
+        drawLegend(ctx, out.height, METRIC_LABELS[metric]);
 
         let url: string;
         try {
@@ -337,11 +355,11 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
         const a = document.createElement("a");
         a.href = url;
-        a.download = "accessibility-area.png";
+        a.download = `accessibility-${metric}.png`;
         a.click();
       },
     }),
-    [areaPoints]
+    [areaPoints, metric]
   );
 
   const handleClick = useCallback(
@@ -417,7 +435,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               type="line"
               layout={{ "line-cap": "round", "line-join": "round" }}
               paint={{
-                "line-color": SEGMENT_COLOR_EXPR as never,
+                "line-color": colorExpr as never,
                 "line-width": [
                   "interpolate",
                   ["linear"],

@@ -16,6 +16,14 @@ export interface ScoreBucket {
   range: string;
 }
 
+/** Which per-segment score drives the map colors. */
+export type ScoreMetric = "walkability_score" | "wheelchair_score";
+
+export const METRIC_LABELS: Record<ScoreMetric, string> = {
+  walkability_score: "Walkability",
+  wheelchair_score: "Wheelchair",
+};
+
 /** Legend entries, ordered best → worst. Shared by the panel and the PNG legend. */
 export const SCORE_LEGEND: ScoreBucket[] = [
   { label: "Accessible", color: SCORE_COLORS.green, range: `≥ ${SCORE_THRESHOLDS.high}` },

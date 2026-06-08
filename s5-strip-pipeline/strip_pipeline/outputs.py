@@ -10,7 +10,7 @@ from PIL import Image
 
 from .footprints import collect_footprint_boxes, make_footprint_debug_strip, render_footprint_box_strip
 from .merge_loftr import make_full_tile_loftr_debug_strip, merge_side_strip
-from .ordering import order_points, strip_sequence
+from .ordering import order_points, strip_sequence, _point_latlon
 from .tiles import PipelineContext, TileResult, build_tile, normalize_canvas_width, warning_tile, select_mask, load_tile_assets
 
 
@@ -93,6 +93,17 @@ def build_all_outputs(ctx: PipelineContext, point_ids: list[str],
     canvas_width = ctx.cfg.canvas_width
     ordered = order_points(ctx.manifest, point_ids)
 
+    # Street centerline geometry for the strip: ordered points' [lon, lat].
+    # This lets downstream tools draw the segment on a map and is embedded in
+    # every METRICS.json so the metrics are geo-referenced.
+    strip_coords: list[list[float]] = []
+    for _pid in ordered:
+        _ll = _point_latlon(ctx.manifest, _pid)
+        if _ll is not None:
+            _lat, _lon = _ll
+            strip_coords.append([round(float(_lon), 7), round(float(_lat), 7)])
+    strip_geometry = {"type": "LineString", "coordinates": strip_coords}
+
     outputs: dict[str, bytes] = {}
     for side in ctx.cfg.sides_to_render:
         avg_w, debug_imgs = _calculate_average_sidewalk_width(ctx, side, ordered)
@@ -124,10 +135,32 @@ def build_all_outputs(ctx: PipelineContext, point_ids: list[str],
             metrics_debug = generate_metrics_debug_strip(rendered, metrics, px_to_m)
             outputs[f"{side}_sidewalk_strip_WALKABILITY_debug.png"] = png_bytes(metrics_debug)
 
-            # Separate METRICS.json
+            # Separate METRICS.json — embed strip geometry + point order so the
+            # metrics are geo-referenced and can be drawn / scored on a map.
             import json
+            metrics_dict = metrics.to_dict()
+            metrics_dict["side"] = side
+            metrics_dict["point_ids"] = ordered
+            metrics_dict["geometry"] = strip_geometry
             outputs[f"{side}_sidewalk_strip_METRICS.json"] = json.dumps(
-                metrics.to_dict(), indent=2
+                metrics_dict, indent=2
+            ).encode("utf-8")
+
+            # Map-ready GeoJSON — one scored LineString feature carrying BOTH a
+            # walkability score and a wheelchair score. Drop many of these into
+            # the web app's Accessibility map (multi-upload) and toggle which
+            # metric drives the color. Shares scoring with the batch CLI.
+            from .accessibility import accessibility_feature
+            _first = ordered[0] if ordered else ""
+            _last = ordered[-1] if ordered else ""
+            seg_id = f"{_first}_{_last}_{side}" if ordered else side
+            accessibility_fc = {
+                "type": "FeatureCollection",
+                "name": "accessibility",
+                "features": [accessibility_feature(metrics_dict, seg_id)],
+            }
+            outputs[f"{side}_sidewalk_strip_ACCESSIBILITY.geojson"] = json.dumps(
+                accessibility_fc, indent=2
             ).encode("utf-8")
 
             H, W = clean.shape[:2]

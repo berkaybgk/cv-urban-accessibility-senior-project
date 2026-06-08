@@ -15,7 +15,7 @@ import AnalysisPanel from "@/components/AnalysisPanel";
 import PointSearch from "@/components/PointSearch";
 import StripBuilder from "@/components/StripBuilder";
 import AccessibilityPanel from "@/components/AccessibilityPanel";
-import type { LngLat } from "@/lib/geo";
+import type { LngLat, ScoreMetric } from "@/lib/geo";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -85,6 +85,7 @@ export default function HomePage() {
   const [areaPoints, setAreaPoints] = useState<LngLat[]>([]);
   const [segments, setSegments] = useState<ScoredSegmentCollection | null>(null);
   const [segmentsError, setSegmentsError] = useState<string | null>(null);
+  const [metric, setMetric] = useState<ScoreMetric>("walkability_score");
   const [exporting, setExporting] = useState(false);
 
   const mapViewRef = useRef<MapViewHandle>(null);
@@ -195,35 +196,73 @@ export default function HomePage() {
     setAreaPoints([]);
   }, []);
 
-  const handleLoadSegments = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(String(reader.result));
-        if (
-          data?.type !== "FeatureCollection" ||
-          !Array.isArray(data.features)
-        ) {
-          throw new Error("Not a GeoJSON FeatureCollection.");
+  const handleLoadFiles = useCallback((files: FileList) => {
+    const readText = (file: File) =>
+      new Promise<{ name: string; text: string }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, text: String(reader.result) });
+        reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+        reader.readAsText(file);
+      });
+
+    Promise.all(Array.from(files).map(readText))
+      .then((results) => {
+        type LineFeature = ScoredSegmentCollection["features"][number];
+        const newFeatures: LineFeature[] = [];
+        const badFiles: string[] = [];
+
+        for (const { name, text } of results) {
+          try {
+            const data = JSON.parse(text);
+            if (data?.type !== "FeatureCollection" || !Array.isArray(data.features)) {
+              throw new Error("not a FeatureCollection");
+            }
+            const lines = (data.features as LineFeature[]).filter(
+              (f) => f?.geometry?.type === "LineString"
+            );
+            if (lines.length === 0) throw new Error("no LineStrings");
+            newFeatures.push(...lines);
+          } catch {
+            badFiles.push(name);
+          }
         }
-        const lineFeatures = data.features.filter(
-          (f: { geometry?: { type?: string } }) =>
-            f?.geometry?.type === "LineString"
-        );
-        if (lineFeatures.length === 0) {
-          throw new Error("No LineString features with scores found.");
+
+        if (newFeatures.length === 0) {
+          setSegmentsError(
+            `No LineString features found in ${badFiles.join(", ") || "the selection"}.`
+          );
+          return;
         }
-        setSegments({ type: "FeatureCollection", features: lineFeatures });
-        setSegmentsError(null);
-      } catch (err) {
-        setSegments(null);
+
+        // Merge with whatever is already loaded, de-duping by feature id
+        // (last one wins). Features without an id are always kept.
+        setSegments((prev) => {
+          const byId = new Map<string, LineFeature>();
+          const anon: LineFeature[] = [];
+          const add = (f: LineFeature) => {
+            const id = f.properties?.id;
+            if (typeof id === "string") byId.set(id, f);
+            else anon.push(f);
+          };
+          prev?.features.forEach(add);
+          newFeatures.forEach(add);
+          return {
+            type: "FeatureCollection",
+            features: [...byId.values(), ...anon],
+          };
+        });
         setSegmentsError(
-          err instanceof Error ? err.message : "Failed to parse file."
+          badFiles.length ? `Skipped (no LineStrings): ${badFiles.join(", ")}` : null
         );
-      }
-    };
-    reader.onerror = () => setSegmentsError("Failed to read file.");
-    reader.readAsText(file);
+      })
+      .catch((err) =>
+        setSegmentsError(err instanceof Error ? err.message : "Failed to read files.")
+      );
+  }, []);
+
+  const handleClearSegments = useCallback(() => {
+    setSegments(null);
+    setSegmentsError(null);
   }, []);
 
   const handleExportPng = useCallback(async () => {
@@ -276,6 +315,7 @@ export default function HomePage() {
         areaPoints={areaPoints}
         segments={segments}
         onAddAreaPoint={handleAddAreaPoint}
+        metric={metric}
       />
 
       {/* Top bar: title + search */}
@@ -371,7 +411,10 @@ export default function HomePage() {
           segmentCount={segments?.features.length ?? null}
           loadError={segmentsError}
           areaPointCount={areaPoints.length}
-          onLoadFile={handleLoadSegments}
+          metric={metric}
+          onMetricChange={setMetric}
+          onLoadFiles={handleLoadFiles}
+          onClearSegments={handleClearSegments}
           onClearArea={handleClearArea}
           onExport={handleExportPng}
           exporting={exporting}

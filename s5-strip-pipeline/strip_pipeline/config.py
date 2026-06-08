@@ -76,6 +76,7 @@ DEFAULT_MANIFEST_CSV = (
 )
 
 
+
 def _load_env() -> None:
     """Load the repo-level .env so GCS credentials/bucket resolve like the notebook."""
     here = Path(__file__).resolve()
