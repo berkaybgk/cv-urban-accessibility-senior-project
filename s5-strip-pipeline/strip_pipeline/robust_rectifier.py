@@ -124,8 +124,8 @@ class RobustHorizonRectifier:
             
         physical_length_m = z_max_m - z_min
         out_height = int(np.ceil(physical_length_m * pixels_per_meter))
-        out_height = min(out_height, 3000) 
-        
+        out_height = max(out_height, 1)
+
         z_out = np.linspace(z_min, z_max_m, out_height)
         if output_order == 'far_to_near':
             z_out = z_out[::-1]
@@ -278,7 +278,7 @@ if __name__ == "__main__":
         bad_mask=bad_mask,
         f_px=f_px,
         camera_height_m=2.5,
-        pixels_per_meter=40.0,
+        pixels_per_meter=213.0,
         z_max_m=20.0
     )
 
