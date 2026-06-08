@@ -75,3 +75,58 @@ export function bboxOf(ring: LngLat[]): [number, number, number, number] {
   }
   return [minLng, minLat, maxLng, maxLat];
 }
+
+export function haversineDistance(coord1: LngLat, coord2: LngLat): number {
+  const R = 6371e3; // Earth radius in meters
+  const lat1 = (coord1[1] * Math.PI) / 180;
+  const lat2 = (coord2[1] * Math.PI) / 180;
+  const deltaLat = ((coord2[1] - coord1[1]) * Math.PI) / 180;
+  const deltaLng = ((coord2[0] - coord1[0]) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLng / 2) * Math.sin(deltaLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // in meters
+}
+
+export function calculateLineStringLength(coords: LngLat[]): number {
+  let total = 0;
+  for (let i = 0; i < coords.length - 1; i++) {
+    total += haversineDistance(coords[i], coords[i + 1]);
+  }
+  return total;
+}
+
+export function getLineStringMidpoint(coordinates: LngLat[]): LngLat {
+  if (coordinates.length === 0) return [0, 0];
+  if (coordinates.length === 1) return coordinates[0];
+
+  let totalLength = 0;
+  const lengths: number[] = [];
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const dist = haversineDistance(coordinates[i], coordinates[i + 1]);
+    lengths.push(dist);
+    totalLength += dist;
+  }
+
+  const targetLength = totalLength / 2;
+  let currentLength = 0;
+
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const dist = lengths[i];
+    if (currentLength + dist >= targetLength) {
+      const ratio = (targetLength - currentLength) / (dist || 1);
+      const [lng1, lat1] = coordinates[i];
+      const [lng2, lat2] = coordinates[i + 1];
+      return [
+        lng1 + (lng2 - lng1) * ratio,
+        lat1 + (lat2 - lat1) * ratio
+      ];
+    }
+    currentLength += dist;
+  }
+
+  return coordinates[coordinates.length - 1];
+}

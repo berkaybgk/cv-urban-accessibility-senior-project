@@ -29,6 +29,7 @@ import {
   METRIC_LABELS,
   bboxOf,
   segmentInPolygon,
+  getLineStringMidpoint,
   type LngLat,
   type ScoreMetric,
 } from "@/lib/geo";
@@ -172,15 +173,20 @@ function calculateAreaStats(features: any[]): AreaStats {
     const props = f.properties || {};
     count++;
 
-    const length = typeof props.strip_length_m === "number" ? props.strip_length_m : 0;
+    const length =
+      typeof props.calculated_length_m === "number"
+        ? props.calculated_length_m
+        : typeof props.strip_length_m === "number"
+          ? props.strip_length_m
+          : 0;
     totalLength += length;
 
     const walkability =
       typeof props.walkability_score === "number"
         ? props.walkability_score
         : typeof props.score === "number"
-        ? props.score
-        : 0;
+          ? props.score
+          : 0;
     sumWalkability += walkability;
 
     const wheelchair = typeof props.wheelchair_score === "number" ? props.wheelchair_score : 0;
@@ -255,6 +261,49 @@ function drawSummary(ctx: CanvasRenderingContext2D, width: number, height: numbe
   });
 }
 
+function createCardImage(): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  const w = 64;
+  const h = 64;
+  const r = 8; // corner radius
+  const pointerH = 8; // pointer height
+  const boxH = h - pointerH; // 56
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Draw the slightly transparent dark gray card
+  ctx.fillStyle = "rgba(20, 20, 20, 0.85)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.lineWidth = 1.5;
+
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(w - r, 0);
+  ctx.quadraticCurveTo(w, 0, w, r);
+  ctx.lineTo(w, boxH - r);
+  ctx.quadraticCurveTo(w, boxH, w - r, boxH);
+
+  // Bottom edge with pointer at the center
+  ctx.lineTo(w / 2 + 6, boxH);
+  ctx.lineTo(w / 2, h); // tip of the pointer pointing to [32, 64]
+  ctx.lineTo(w / 2 - 6, boxH);
+  ctx.lineTo(r, boxH);
+  ctx.quadraticCurveTo(0, boxH, 0, boxH - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+
+  ctx.fill();
+  ctx.stroke();
+
+  return canvas;
+}
+
 function buildGeoJSON(points: PointsHashMap) {
   const features = Object.values(points).map((pt) => ({
     type: "Feature" as const,
@@ -292,10 +341,9 @@ function StyleSwitcher({
                 setOpen(false);
               }}
               className={`block w-full text-left px-4 py-2 text-xs font-medium transition-colors
-                ${
-                  current === style.id
-                    ? "bg-neutral-600/40 text-white"
-                    : "text-neutral-300 hover:bg-neutral-700/50 hover:text-white"
+                ${current === style.id
+                  ? "bg-neutral-600/40 text-white"
+                  : "text-neutral-300 hover:bg-neutral-700/50 hover:text-white"
                 }`}
             >
               {style.label}
@@ -370,6 +418,21 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       ),
     };
   }, [segments, areaPoints]);
+
+  const labelPointsFC = useMemo(() => {
+    if (!segmentsFC || !segmentsFC.features) return EMPTY_FC;
+    return {
+      type: "FeatureCollection" as const,
+      features: segmentsFC.features.map((f) => ({
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: getLineStringMidpoint(f.geometry.coordinates as LngLat[]),
+        },
+        properties: f.properties,
+      })),
+    };
+  }, [segmentsFC]);
 
   const areaPolygonFC = useMemo(() => {
     if (areaPoints.length < 3) return EMPTY_FC;
@@ -529,6 +592,37 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     if (map) map.getCanvas().style.cursor = "";
   }, []);
 
+  const handleMapLoad = useCallback((e: any) => {
+    const map = e.target;
+    const addedImages = new Set<string>();
+
+    map.on("styledata", () => {
+      addedImages.clear();
+    });
+
+    map.on("styleimagemissing", (ev: any) => {
+      if (ev.id === "card-bg") {
+        if (!addedImages.has("card-bg") && !map.hasImage("card-bg")) {
+          addedImages.add("card-bg");
+          const img = createCardImage();
+          const ctx = img.getContext("2d");
+          if (ctx) {
+            try {
+              const imgData = ctx.getImageData(0, 0, img.width, img.height);
+              map.addImage("card-bg", imgData, {
+                stretchX: [[10, 24], [40, 54]],
+                stretchY: [[10, 46]],
+              });
+            } catch (err) {
+              console.error("Failed to add speech bubble image to map style:", err);
+              addedImages.delete("card-bg");
+            }
+          }
+        }
+      }
+    });
+  }, []);
+
   return (
     <Map
       ref={mapRef}
@@ -543,6 +637,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onLoad={handleMapLoad}
       preserveDrawingBuffer
     >
       {accessMode && (
@@ -582,15 +677,22 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 "line-opacity": 0.95,
               }}
             />
+          </Source>
+
+          <Source id="segment-labels-source" type="geojson" data={labelPointsFC}>
             <Layer
               id="segment-labels"
               type="symbol"
               layout={{
+                "icon-image": "card-bg",
+                "icon-text-fit": "both",
+                "icon-text-fit-padding": [6, 10, 10, 10],
+                "icon-anchor": "center",
                 "text-field": [
                   "concat",
                   ["coalesce", ["get", "id"], ""],
                   " (L: ",
-                  ["number-format", ["coalesce", ["get", "strip_length_m"], 0], { "max-fraction-digits": 1 }],
+                  ["number-format", ["coalesce", ["get", "calculated_length_m"], ["get", "strip_length_m"], 0], { "max-fraction-digits": 1 }],
                   "m)\n",
                   "Min Width: ",
                   ["number-format", ["coalesce", ["get", "min_clear_width_m"], 0], { "max-fraction-digits": 2, "min-fraction-digits": 2 }],
@@ -619,16 +721,18 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 "symbol-placement": "point",
                 "text-size": 10.5,
                 "text-keep-upright": true,
-                "text-anchor": "bottom",
-                "text-offset": [0, -0.6],
+                "text-anchor": "center",
+                "text-offset": [0, -3.0],
                 "text-justify": "left",
-                "text-allow-overlap": false,
-                "text-ignore-placement": false,
+                "text-rotation-alignment": "viewport",
+                "icon-rotation-alignment": "viewport",
+                "text-allow-overlap": true,
+                "icon-allow-overlap": true,
+                "text-ignore-placement": true,
+                "icon-ignore-placement": true,
               }}
               paint={{
                 "text-color": "#ffffff",
-                "text-halo-color": "rgba(23, 23, 23, 0.9)",
-                "text-halo-width": 3.5,
               }}
             />
           </Source>

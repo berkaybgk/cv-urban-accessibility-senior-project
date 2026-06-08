@@ -15,7 +15,7 @@ import AnalysisPanel from "@/components/AnalysisPanel";
 import PointSearch from "@/components/PointSearch";
 import StripBuilder from "@/components/StripBuilder";
 import AccessibilityPanel from "@/components/AccessibilityPanel";
-import type { LngLat, ScoreMetric } from "@/lib/geo";
+import { type LngLat, type ScoreMetric, calculateLineStringLength } from "@/lib/geo";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -222,6 +222,18 @@ export default function HomePage() {
               (f) => f?.geometry?.type === "LineString"
             );
             if (lines.length === 0) throw new Error("no LineStrings");
+
+            // Calculate length using Haversine distance formula
+            lines.forEach((f) => {
+              if (f.geometry && f.geometry.coordinates) {
+                const len = calculateLineStringLength(f.geometry.coordinates as [number, number][]);
+                f.properties = {
+                  ...f.properties,
+                  calculated_length_m: len,
+                };
+              }
+            });
+
             newFeatures.push(...lines);
           } catch {
             badFiles.push(name);
