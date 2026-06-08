@@ -143,7 +143,115 @@ function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string
     ctx.fillStyle = b.color;
     ctx.fillRect(x + pad, ry - swatch / 2, swatch, swatch);
     ctx.fillStyle = "#ffffff";
-    ctx.fillText(`${b.label}  (${b.range})`, x + pad + swatch + 8, ry);
+  });
+}
+
+interface AreaStats {
+  count: number;
+  totalLength: number;
+  avgWalkability: number;
+  avgWheelchair: number;
+  avgMinWidth: number;
+  passablePercent: number;
+  adaPercent: number;
+  totalDrops: number;
+}
+
+function calculateAreaStats(features: any[]): AreaStats {
+  let count = 0;
+  let totalLength = 0;
+  let sumWalkability = 0;
+  let sumWheelchair = 0;
+  let sumMinWidth = 0;
+  let minWidthCount = 0;
+  let passableCount = 0;
+  let adaCount = 0;
+  let totalDrops = 0;
+
+  features.forEach((f) => {
+    const props = f.properties || {};
+    count++;
+
+    const length = typeof props.strip_length_m === "number" ? props.strip_length_m : 0;
+    totalLength += length;
+
+    const walkability =
+      typeof props.walkability_score === "number"
+        ? props.walkability_score
+        : typeof props.score === "number"
+        ? props.score
+        : 0;
+    sumWalkability += walkability;
+
+    const wheelchair = typeof props.wheelchair_score === "number" ? props.wheelchair_score : 0;
+    sumWheelchair += wheelchair;
+
+    if (typeof props.min_clear_width_m === "number") {
+      sumMinWidth += props.min_clear_width_m;
+      minWidthCount++;
+    }
+
+    if (props.wheelchair_passable_65cm === true || props.wheelchair_passable_65cm === "true") {
+      passableCount++;
+    }
+
+    if (props.ada_accessible_90cm === true || props.ada_accessible_90cm === "true") {
+      adaCount++;
+    }
+
+    if (typeof props.width_drop_60cm_count === "number") {
+      totalDrops += props.width_drop_60cm_count;
+    }
+  });
+
+  return {
+    count,
+    totalLength,
+    avgWalkability: count > 0 ? sumWalkability / count : 0,
+    avgWheelchair: count > 0 ? sumWheelchair / count : 0,
+    avgMinWidth: minWidthCount > 0 ? sumMinWidth / minWidthCount : 0,
+    passablePercent: count > 0 ? (passableCount / count) * 100 : 0,
+    adaPercent: count > 0 ? (adaCount / count) * 100 : 0,
+    totalDrops,
+  };
+}
+
+function drawSummary(ctx: CanvasRenderingContext2D, width: number, height: number, stats: AreaStats) {
+  const pad = 10;
+  const rowH = 18;
+  const boxW = 200;
+  const titleH = 20;
+  const rows = [
+    `Segments: ${stats.count}`,
+    `Total Length: ${stats.totalLength.toFixed(1)} m`,
+    `Avg Walkability: ${stats.avgWalkability.toFixed(2)}`,
+    `Avg Wheelchair: ${stats.avgWheelchair.toFixed(2)}`,
+    `Avg Min Width: ${stats.avgMinWidth > 0 ? `${stats.avgMinWidth.toFixed(2)} m` : "N/A"}`,
+    `Passable (65cm): ${stats.passablePercent.toFixed(0)}%`,
+    `ADA (90cm): ${stats.adaPercent.toFixed(0)}%`,
+    `Width Drops (<60cm): ${stats.totalDrops}`,
+  ];
+
+  const boxH = pad * 2 + titleH + rows.length * rowH;
+  const x = width - boxW - pad;
+  const y = pad; // Top-right corner
+
+  ctx.fillStyle = "rgba(17,17,17,0.82)";
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, boxW, boxH);
+  ctx.strokeRect(x, y, boxW, boxH);
+
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText("Area Summary", x + pad, y + pad + titleH / 2);
+
+  ctx.font = "11px sans-serif";
+  rows.forEach((row, i) => {
+    const ry = y + pad + titleH + i * rowH + rowH / 2;
+    ctx.fillStyle = "#e5e5e5";
+    ctx.fillText(row, x + pad, ry);
   });
 }
 
@@ -312,56 +420,81 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         if (areaPoints.length !== 4) {
           throw new Error("Pick 4 corners on the map first.");
         }
-        const [minLng, minLat, maxLng, maxLat] = bboxOf(areaPoints);
-        map.fitBounds(
-          [
-            [minLng, minLat],
-            [maxLng, maxLat],
-          ],
-          { padding: 48, animate: false }
-        );
-        await new Promise<void>((resolve) => map.once("idle", () => resolve()));
 
-        const canvas = map.getCanvas();
-        const scaleX = canvas.width / canvas.clientWidth;
-        const scaleY = canvas.height / canvas.clientHeight;
-        const projected = areaPoints.map((c) => map.project(c));
-        const xs = projected.map((p) => p.x);
-        const ys = projected.map((p) => p.y);
-        const sx = Math.max(0, Math.floor(Math.min(...xs) * scaleX));
-        const sy = Math.max(0, Math.floor(Math.min(...ys) * scaleY));
-        const sw = Math.min(
-          canvas.width - sx,
-          Math.ceil((Math.max(...xs) - Math.min(...xs)) * scaleX)
-        );
-        const sh = Math.min(
-          canvas.height - sy,
-          Math.ceil((Math.max(...ys) - Math.min(...ys)) * scaleY)
-        );
-
-        const out = document.createElement("canvas");
-        out.width = Math.max(1, sw);
-        out.height = Math.max(1, sh);
-        const ctx = out.getContext("2d");
-        if (!ctx) throw new Error("Could not create export canvas.");
-        ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-        drawLegend(ctx, out.height, METRIC_LABELS[metric]);
-
-        let url: string;
+        // Hide green selected region layers
         try {
-          url = out.toDataURL("image/png");
-        } catch {
-          throw new Error(
-            "Export blocked by the basemap (CORS). Switch to the Light or Voyager style and retry."
-          );
+          if (map.getLayer("area-fill")) map.setLayoutProperty("area-fill", "visibility", "none");
+          if (map.getLayer("area-outline")) map.setLayoutProperty("area-outline", "visibility", "none");
+          if (map.getLayer("area-corner-circles")) map.setLayoutProperty("area-corner-circles", "visibility", "none");
+        } catch (err) {
+          console.error("Failed to hide selection layers:", err);
         }
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `accessibility-${metric}.png`;
-        a.click();
+
+        try {
+          const [minLng, minLat, maxLng, maxLat] = bboxOf(areaPoints);
+          map.fitBounds(
+            [
+              [minLng, minLat],
+              [maxLng, maxLat],
+            ],
+            { padding: 48, animate: false }
+          );
+          await new Promise<void>((resolve) => map.once("idle", () => resolve()));
+
+          const canvas = map.getCanvas();
+          const scaleX = canvas.width / canvas.clientWidth;
+          const scaleY = canvas.height / canvas.clientHeight;
+          const projected = areaPoints.map((c) => map.project(c));
+          const xs = projected.map((p) => p.x);
+          const ys = projected.map((p) => p.y);
+          const sx = Math.max(0, Math.floor(Math.min(...xs) * scaleX));
+          const sy = Math.max(0, Math.floor(Math.min(...ys) * scaleY));
+          const sw = Math.min(
+            canvas.width - sx,
+            Math.ceil((Math.max(...xs) - Math.min(...xs)) * scaleX)
+          );
+          const sh = Math.min(
+            canvas.height - sy,
+            Math.ceil((Math.max(...ys) - Math.min(...ys)) * scaleY)
+          );
+
+          const out = document.createElement("canvas");
+          out.width = Math.max(1, sw);
+          out.height = Math.max(1, sh);
+          const ctx = out.getContext("2d");
+          if (!ctx) throw new Error("Could not create export canvas.");
+          ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+          drawLegend(ctx, out.height, METRIC_LABELS[metric]);
+
+          // Draw stats summary card
+          const stats = calculateAreaStats(segmentsFC.features);
+          drawSummary(ctx, out.width, out.height, stats);
+
+          let url: string;
+          try {
+            url = out.toDataURL("image/png");
+          } catch {
+            throw new Error(
+              "Export blocked by the basemap (CORS). Switch to the Light or Voyager style and retry."
+            );
+          }
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `accessibility-${metric}.png`;
+          a.click();
+        } finally {
+          // Restore green selected region layers
+          try {
+            if (map.getLayer("area-fill")) map.setLayoutProperty("area-fill", "visibility", "visible");
+            if (map.getLayer("area-outline")) map.setLayoutProperty("area-outline", "visibility", "visible");
+            if (map.getLayer("area-corner-circles")) map.setLayoutProperty("area-corner-circles", "visibility", "visible");
+          } catch (err) {
+            console.error("Failed to restore selection layers:", err);
+          }
+        }
       },
     }),
-    [areaPoints, metric]
+    [areaPoints, metric, segmentsFC]
   );
 
   const handleClick = useCallback(
@@ -447,6 +580,55 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                   19, 10,
                 ],
                 "line-opacity": 0.95,
+              }}
+            />
+            <Layer
+              id="segment-labels"
+              type="symbol"
+              layout={{
+                "text-field": [
+                  "concat",
+                  ["coalesce", ["get", "id"], ""],
+                  " (L: ",
+                  ["number-format", ["coalesce", ["get", "strip_length_m"], 0], { "max-fraction-digits": 1 }],
+                  "m)\n",
+                  "Min Width: ",
+                  ["number-format", ["coalesce", ["get", "min_clear_width_m"], 0], { "max-fraction-digits": 2, "min-fraction-digits": 2 }],
+                  "m | Drops: ",
+                  ["to-string", ["coalesce", ["get", "width_drop_60cm_count"], 0]],
+                  "\n",
+                  "Wheelchair: ",
+                  ["case",
+                    ["any",
+                      ["==", ["get", "wheelchair_passable_65cm"], true],
+                      ["==", ["get", "wheelchair_passable_65cm"], "true"]
+                    ],
+                    "Pass",
+                    "Fail"
+                  ],
+                  " | ADA: ",
+                  ["case",
+                    ["any",
+                      ["==", ["get", "ada_accessible_90cm"], true],
+                      ["==", ["get", "ada_accessible_90cm"], "true"]
+                    ],
+                    "Yes",
+                    "No"
+                  ]
+                ],
+                "symbol-placement": "point",
+                "text-size": 10.5,
+                "text-keep-upright": true,
+                "text-anchor": "bottom",
+                "text-offset": [0, -0.6],
+                "text-justify": "left",
+                "text-allow-overlap": false,
+                "text-ignore-placement": false,
+              }}
+              paint={{
+                "text-color": "#ffffff",
+                "text-halo-color": "rgba(23, 23, 23, 0.9)",
+                "text-halo-width": 3.5,
               }}
             />
           </Source>
