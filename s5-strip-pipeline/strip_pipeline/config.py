@@ -54,16 +54,21 @@ MIN_CONFIDENCE = 0.5
 RESTRICT_TO_SIDEWALK = False
 ROAD_VIEW_MATCH_KEEP_RATIO = 0.50
 SIDE_VIEW_PAIR_KEEP_RATIO = 0.50
-ROAD_SIDE_PAIR_KEEP_RATIO = 0.40
+ROAD_SIDE_PAIR_KEEP_RATIO = 0.20
 ROAD_ROAD_PAIR_KEEP_RATIO = 1.0
 MIN_RANSAC_INLIERS = 4
 
 # Defaults that the service may override per request.
 DEFAULT_TARGET_SIDEWALK_WIDTH_PX = 480
-DEFAULT_MASKS_ROOT = "v4-20260516T081917Z/segmentation-results"
+# DEFAULT_MASKS_ROOT = "v4-20260516T081917Z/segmentation-results"
+DEFAULT_MASKS_ROOT = "v3/segmentation-results"
+# DEFAULT_MANIFEST_CSV = (
+#     "https://storage.cloud.google.com/cv-urban-accessibility-bucket/"
+#     "streetview/polygon_4v/20260516T081917Z/manifest.csv"
+# )
 DEFAULT_MANIFEST_CSV = (
     "https://storage.cloud.google.com/cv-urban-accessibility-bucket/"
-    "streetview/polygon_4v/20260516T081917Z/manifest.csv"
+    "streetview/polygon_4v/20260404T133859Z/manifest.csv"
 )
 
 
