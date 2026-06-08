@@ -189,7 +189,8 @@ def build_strip(ctx: PipelineContext, point_ids: list[str],
     if upload:
         gcs_prefix = f"{ctx.cfg.strips_gcs_prefix.rstrip('/')}/{strip_id}/"
         for name, data in outputs.items():
-            ctx.gcs.upload_bytes(f"{gcs_prefix}{name}", data, content_type="image/png")
+            content_type = "application/json" if name.endswith(".json") else "image/png"
+            ctx.gcs.upload_bytes(f"{gcs_prefix}{name}", data, content_type=content_type)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:

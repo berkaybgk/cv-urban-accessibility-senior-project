@@ -33,6 +33,85 @@ def _segment_mask_slice(mask: np.ndarray, start: int, end: int, canvas_width: in
     return mask[start:end, :].astype(bool)
 
 
+def _deduplicate_boxes(boxes: list[dict[str, Any]], x_overlap_ratio: float = 0.5,
+                        max_y_gap_px: int = 80) -> list[dict[str, Any]]:
+    """Merge seam-split footprint boxes that belong to the same physical obstacle.
+
+    After the LoFTR seam cut, a footprint straddling the boundary between tile N
+    and tile N+1 is sliced into two **non-overlapping** halves that are placed
+    consecutively in the output strip.  IoU is always ~0 for these pairs, so the
+    correct signal is:
+
+      1. Same ``class_name``
+      2. ``tile_index`` values differ by exactly 1 (consecutive tiles)
+      3. Their horizontal spans overlap by at least *x_overlap_ratio* of the
+         smaller box's width  (same column position → same obstacle)
+      4. The vertical gap between the bottom of the lower box and the top of the
+         upper box is within *max_y_gap_px*  (they are adjacent in the strip)
+
+    When all four conditions hold the two boxes are merged into a single union
+    bounding box, keeping the tile metadata of the lower (first-emitted) box.
+    """
+    if not boxes:
+        return boxes
+
+    def _x_overlap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+        """Fraction of the smaller box's horizontal span that overlaps with the other."""
+        a_c0, a_c1 = a[1], a[3]
+        b_c0, b_c1 = b[1], b[3]
+        inter = max(0, min(a_c1, b_c1) - max(a_c0, b_c0))
+        if inter == 0:
+            return 0.0
+        smaller_w = min(a_c1 - a_c0, b_c1 - b_c0)
+        return inter / max(1, smaller_w)
+
+    def _y_gap(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> int:
+        """Vertical gap between two vertically adjacent (non-overlapping) boxes.
+        Returns 0 if they actually overlap in y.
+        a and b can be in any order; we always return the gap between the pair.
+        """
+        top_box, bot_box = (a, b) if a[0] <= b[0] else (b, a)
+        return max(0, bot_box[0] - top_box[2])  # bot.top - top.bottom
+
+    def _is_seam_duplicate(bi: dict, bj: dict) -> bool:
+        if bi["class_name"] != bj["class_name"]:
+            return False
+        if abs(bi["tile_index"] - bj["tile_index"]) != 1:
+            return False
+        if _x_overlap(bi["bbox"], bj["bbox"]) < x_overlap_ratio:
+            return False
+        if _y_gap(bi["bbox"], bj["bbox"]) > max_y_gap_px:
+            return False
+        return True
+
+    # Sort by tile_index then top-row so earlier (lower in the strip) boxes come first.
+    sorted_boxes = sorted(boxes, key=lambda b: (b["tile_index"], b["bbox"][0]))
+    used = [False] * len(sorted_boxes)
+    merged: list[dict[str, Any]] = []
+
+    for i, box_i in enumerate(sorted_boxes):
+        if used[i]:
+            continue
+        current = dict(box_i)
+        for j in range(i + 1, len(sorted_boxes)):
+            if used[j]:
+                continue
+            box_j = sorted_boxes[j]
+            # Tile indices increase monotonically; once we're 2+ tiles away stop.
+            if box_j["tile_index"] > current["tile_index"] + 1:
+                break
+            if _is_seam_duplicate(current, box_j):
+                r0 = min(current["bbox"][0], box_j["bbox"][0])
+                c0 = min(current["bbox"][1], box_j["bbox"][1])
+                r1 = max(current["bbox"][2], box_j["bbox"][2])
+                c1 = max(current["bbox"][3], box_j["bbox"][3])
+                current["bbox"] = (r0, c0, r1, c1)
+                used[j] = True
+        merged.append(current)
+
+    return merged
+
+
 def collect_footprint_boxes(segments: list[dict[str, Any]], output_shape: tuple[int, int]) -> tuple[np.ndarray, list[dict[str, Any]]]:
     H, W = output_shape
     sidewalk = np.zeros((H, W), dtype=bool)
@@ -69,6 +148,7 @@ def collect_footprint_boxes(segments: list[dict[str, Any]], output_shape: tuple[
                     "tile_label": tile_label(tile),
                 })
 
+    boxes = _deduplicate_boxes(boxes)
     return sidewalk, boxes
 
 
