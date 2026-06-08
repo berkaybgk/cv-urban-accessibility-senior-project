@@ -12,6 +12,7 @@ interface SidewalkSceneProps {
   pxToMeter?: number;
   side: "left" | "right";
   avgSidewalkWidthM?: number;
+  targetSidewalkWidthPx?: number;
 }
 
 interface ObstacleProps {
@@ -249,12 +250,18 @@ export default function SidewalkScene({
   boxes,
   stripHeight,
   stripWidth,
-  pxToMeter = 0.05,
+  pxToMeter: propPxToMeter = 0.05,
   side,
   avgSidewalkWidthM,
+  targetSidewalkWidthPx,
 }: SidewalkSceneProps) {
+  // Compute pxToMeter dynamically based on estimated physical width
+  const pxToMeter = avgSidewalkWidthM && targetSidewalkWidthPx
+    ? avgSidewalkWidthM / targetSidewalkWidthPx
+    : propPxToMeter;
+
   // Convert full dimensions to meters
-  const actualSidewalkWidthM = avgSidewalkWidthM || 480 * pxToMeter;
+  const actualSidewalkWidthM = avgSidewalkWidthM || (stripWidth * pxToMeter);
   const sidewalkLengthM = stripHeight * pxToMeter;
   const roadWidthM = 5.0;
 

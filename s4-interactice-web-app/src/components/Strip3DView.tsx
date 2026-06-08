@@ -93,11 +93,10 @@ export default function Strip3DView({ gcsPrefix }: Strip3DViewProps) {
               <button
                 key={side}
                 onClick={() => setSelectedSide(side)}
-                className={`rounded px-3 py-1 text-xs font-semibold uppercase transition-colors ${
-                  selectedSide === side
+                className={`rounded px-3 py-1 text-xs font-semibold uppercase transition-colors ${selectedSide === side
                     ? "bg-cyan-600 text-white shadow-sm"
                     : "text-neutral-400 hover:text-neutral-200"
-                }`}
+                  }`}
               >
                 {side}
               </button>
@@ -110,17 +109,11 @@ export default function Strip3DView({ gcsPrefix }: Strip3DViewProps) {
             <div>
               Width:{" "}
               <span className="text-neutral-200 font-medium">
-                {(metadata.width * pxToMeter).toFixed(1)}m
+                {(metadata.avg_sidewalk_width_m ?? (metadata.width * pxToMeter)).toFixed(1)}m
               </span>{" "}
-              <span className="text-neutral-500">({metadata.width}px)</span>
-            </div>
-            <div className="h-3 w-[1px] bg-neutral-700" />
-            <div>
-              Length:{" "}
-              <span className="text-neutral-200 font-medium">
-                {(metadata.height * pxToMeter).toFixed(1)}m
-              </span>{" "}
-              <span className="text-neutral-500">({metadata.height}px)</span>
+              <span className="text-neutral-500">
+                ({metadata.target_sidewalk_width_px ?? metadata.width}px)
+              </span>
             </div>
             <div className="h-3 w-[1px] bg-neutral-700" />
             <div>
@@ -232,6 +225,7 @@ export default function Strip3DView({ gcsPrefix }: Strip3DViewProps) {
                 pxToMeter={pxToMeter}
                 side={selectedSide}
                 avgSidewalkWidthM={metadata.avg_sidewalk_width_m}
+                targetSidewalkWidthPx={metadata.target_sidewalk_width_px}
               />
 
               {/* Navigation Guide Overlay */}

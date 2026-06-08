@@ -261,3 +261,183 @@ def calculate_width(
     z_curb = get_z(y_curb)
     width = z_wall - z_curb
     return width, z_wall, z_curb
+
+
+def generate_width_debug_plot(
+    image_rgb: np.ndarray,
+    mask: np.ndarray,
+    boundary: BoundaryResult,
+    width: float,
+    z_wall: float,
+    z_curb: float,
+    fov_deg: float = FOV_DEG,
+    pitch_deg: float = PITCH_DEG,
+    cam_height: float = CAM_HEIGHT_M,
+    point_id: str = "?",
+    side: str = "?",
+) -> bytes:
+    """Generate a 3-panel PNG debug image illustrating the sidewalk width estimation steps."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import io
+
+    # Create figure
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6), gridspec_kw={"width_ratios": [1.3, 1.0, 1.1]})
+
+    # Panel 1: Image & Boundaries Overlay
+    ax_img = axes[0]
+    ax_img.imshow(image_rgb)
+    H, W = image_rgb.shape[:2]
+
+    # Overlay sidewalk mask
+    mask_colored = np.zeros_like(image_rgb)
+    mask_colored[mask] = [0, 128, 255] # Sky blue tint
+    ax_img.imshow(mask_colored, alpha=0.35)
+
+    if boundary.success:
+        cols_line = np.arange(W)
+        upper_line = boundary.a_upper * cols_line + boundary.b_upper
+        lower_line = boundary.a_lower * cols_line + boundary.b_lower
+
+        ax_img.plot(cols_line, upper_line, color="#00FF00", linewidth=2.5, label="Upper Boundary (Wall)")
+        ax_img.plot(cols_line, lower_line, color="#FF3333", linewidth=2.5, label="Lower Boundary (Curb)")
+        
+        # Center column marker
+        col_mid = W / 2.0
+        ax_img.axvline(col_mid, color="yellow", linestyle="--", alpha=0.75, label="Center Column")
+        
+        # Intersection points
+        ax_img.scatter(col_mid, boundary.y_upper_mid, color="#00FF00", edgecolors="white", s=80, zorder=5)
+        ax_img.scatter(col_mid, boundary.y_lower_mid, color="#FF3333", edgecolors="white", s=80, zorder=5)
+
+    ax_img.set_xlim(0, W)
+    ax_img.set_ylim(H, 0)
+    ax_img.set_title(f"Sidewalk Detection & Boundaries\nPoint: {point_id} | Side: {side}", fontsize=12, fontweight="bold")
+    ax_img.legend(loc="upper right")
+    ax_img.axis("off")
+
+    # Calculate angles for Panel 3 / Panel 2
+    fov_rad = math.radians(fov_deg)
+    pitch_rad = math.radians(pitch_deg)
+    f_y = H / (2 * math.tan(fov_rad / 2))
+    c_y = H / 2.0
+
+    gamma_wall_rad = math.atan((boundary.y_upper_mid - c_y) / f_y)
+    gamma_wall_deg = math.degrees(gamma_wall_rad)
+    theta_wall_rad = abs(pitch_rad) + gamma_wall_rad
+    theta_wall_deg = math.degrees(theta_wall_rad)
+
+    gamma_curb_rad = math.atan((boundary.y_lower_mid - c_y) / f_y)
+    gamma_curb_deg = math.degrees(gamma_curb_rad)
+    theta_curb_rad = abs(pitch_rad) + gamma_curb_rad
+    theta_curb_deg = math.degrees(theta_curb_rad)
+
+    # Panel 2: 2D Pinhole Geometry Schematic
+    ax_geom = axes[1]
+    
+    # Establish max distance for plotting
+    max_z = max(z_wall if not math.isinf(z_wall) else 10.0, z_curb if not math.isinf(z_curb) else 5.0)
+    limit_z = max_z + 1.5
+    
+    # Ground plane
+    ax_geom.axhline(0, color="black", linewidth=1.5, zorder=1)
+    
+    # Camera pole
+    ax_geom.plot([0, 0], [0, cam_height], color="#555555", linewidth=3, zorder=2)
+    ax_geom.scatter(0, cam_height, color="#111111", marker="o", s=120, label="Camera Lens", zorder=6)
+    
+    # Horizontal reference at camera level
+    ax_geom.plot([0, limit_z], [cam_height, cam_height], color="grey", linestyle=":", alpha=0.7, zorder=1)
+    
+    # Ray paths
+    if not math.isinf(z_wall):
+        ax_geom.plot([0, z_wall], [cam_height, 0], color="#22C55E", linewidth=2, linestyle="-", label="Wall Ray (Far)", zorder=3)
+        ax_geom.scatter(z_wall, 0, color="#22C55E", edgecolors="black", s=70, zorder=5)
+    if not math.isinf(z_curb):
+        ax_geom.plot([0, z_curb], [cam_height, 0], color="#EF4444", linewidth=2, linestyle="-", label="Curb Ray (Near)", zorder=3)
+        ax_geom.scatter(z_curb, 0, color="#EF4444", edgecolors="black", s=70, zorder=5)
+
+    # Optical axis (center row c_y ray)
+    z_center = cam_height / math.tan(abs(pitch_rad))
+    if 0 < z_center < limit_z:
+        ax_geom.plot([0, z_center], [cam_height, 0], color="grey", linewidth=1.5, linestyle="--", alpha=0.5, label="Optical Axis (c_y)", zorder=2)
+
+    # Width Dimension Annotation
+    if not math.isinf(z_wall) and not math.isinf(z_curb) and width > 0:
+        y_arrow = -0.15
+        ax_geom.annotate(
+            "",
+            xy=(z_curb, y_arrow),
+            xytext=(z_wall, y_arrow),
+            arrowprops=dict(arrowstyle="<->", color="purple", lw=2, shrinkA=0, shrinkB=0),
+            zorder=4
+        )
+        ax_geom.text(
+            (z_curb + z_wall) / 2.0,
+            y_arrow - 0.2,
+            f"Width: {width:.3f} m",
+            color="purple",
+            fontsize=10,
+            fontweight="bold",
+            ha="center",
+            va="top"
+        )
+        
+    ax_geom.set_xlim(-0.5, limit_z)
+    ax_geom.set_ylim(-0.6, cam_height + 0.6)
+    ax_geom.set_xlabel("Ground Distance Z (meters)", fontsize=10)
+    ax_geom.set_ylabel("Height Y (meters)", fontsize=10)
+    ax_geom.set_title("2D Ground Projection Geometry", fontsize=12, fontweight="bold")
+    ax_geom.grid(True, linestyle=":", alpha=0.5)
+    ax_geom.legend(loc="upper right", fontsize=8)
+
+    # Panel 3: Equations and Math Walkthrough
+    ax_math = axes[2]
+    ax_math.axis("off")
+    
+    math_text = (
+        f"PINHOLE PROJECTION MATH:\n"
+        f"========================\n\n"
+        f"1. CAMERA CONFIGURATION:\n"
+        f"  • Height (h)       = {cam_height:.2f} m\n"
+        f"  • Down Pitch       = {abs(pitch_deg):.2f}° ({abs(pitch_rad):.4f} rad)\n"
+        f"  • Vertical FOV     = {fov_deg:.2f}° ({fov_rad:.4f} rad)\n\n"
+        f"2. CALIBRATION CONSTANTS:\n"
+        f"  • Image Height (H) = {H} px\n"
+        f"  • Center Row (c_y) = {c_y:.1f} px\n"
+        f"  • Focal Length (f) = H / (2*tan(FOV/2)) = {f_y:.2f} px\n\n"
+        f"3. UPPER BOUNDARY (WALL SIDE):\n"
+        f"  • Pixel Row (y_w)  = {boundary.y_upper_mid:.2f} px\n"
+        f"  • Offset (γ_w)     = atan((y_w - c_y) / f)\n"
+        f"                     = {gamma_wall_deg:+.2f}° ({gamma_wall_rad:+.4f} rad)\n"
+        f"  • Ray Angle (θ_w)  = |pitch| + γ_w\n"
+        f"                     = {theta_wall_deg:.2f}° ({theta_wall_rad:.4f} rad)\n"
+        f"  • Ground Z (Z_w)   = h / tan(θ_w) = {z_wall:.3f} m\n\n"
+        f"4. LOWER BOUNDARY (CURB SIDE):\n"
+        f"  • Pixel Row (y_c)  = {boundary.y_lower_mid:.2f} px\n"
+        f"  • Offset (γ_c)     = atan((y_c - c_y) / f)\n"
+        f"                     = {gamma_curb_deg:+.2f}° ({gamma_curb_rad:+.4f} rad)\n"
+        f"  • Ray Angle (θ_c)  = |pitch| + γ_c\n"
+        f"                     = {theta_curb_deg:.2f}° ({theta_curb_rad:.4f} rad)\n"
+        f"  • Ground Z (Z_c)   = h / tan(θ_c) = {z_curb:.3f} m\n\n"
+        f"5. ESTIMATED SIDEWALK WIDTH:\n"
+        f"  • Width = Z_w - Z_c\n"
+        f"          = {z_wall:.3f} - {z_curb:.3f} = {width:.3f} m"
+    )
+    
+    ax_math.text(
+        0.05, 0.95,
+        math_text,
+        fontsize=9,
+        fontfamily="monospace",
+        va="top",
+        ha="left",
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="#F8FAFC", edgecolor="#E2E8F0")
+    )
+    
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", dpi=120)
+    plt.close(fig)
+    return buf.getvalue()
