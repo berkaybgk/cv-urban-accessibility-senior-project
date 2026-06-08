@@ -8,11 +8,14 @@ import type {
   Direction,
   AnalysisResult,
   AlternativeWidthResult,
+  ScoredSegmentCollection,
 } from "@/lib/types";
 import type { MapViewHandle } from "@/components/MapView";
 import AnalysisPanel from "@/components/AnalysisPanel";
 import PointSearch from "@/components/PointSearch";
 import StripBuilder from "@/components/StripBuilder";
+import AccessibilityPanel from "@/components/AccessibilityPanel";
+import type { LngLat } from "@/lib/geo";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -77,6 +80,12 @@ export default function HomePage() {
   const [stripMode, setStripMode] = useState(false);
   const [stripSelectedIds, setStripSelectedIds] = useState<string[]>([]);
   const [stripBuilderOpen, setStripBuilderOpen] = useState(false);
+
+  const [accessMode, setAccessMode] = useState(false);
+  const [areaPoints, setAreaPoints] = useState<LngLat[]>([]);
+  const [segments, setSegments] = useState<ScoredSegmentCollection | null>(null);
+  const [segmentsError, setSegmentsError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -161,9 +170,74 @@ export default function HomePage() {
       const next = !on;
       if (next) {
         setPanelOpen(false);
+        setAccessMode(false);
       }
       return next;
     });
+  }, []);
+
+  const toggleAccessMode = useCallback(() => {
+    setAccessMode((on) => {
+      const next = !on;
+      if (next) {
+        setPanelOpen(false);
+        setStripMode(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleAddAreaPoint = useCallback((lngLat: LngLat) => {
+    setAreaPoints((prev) => (prev.length >= 4 ? prev : [...prev, lngLat]));
+  }, []);
+
+  const handleClearArea = useCallback(() => {
+    setAreaPoints([]);
+  }, []);
+
+  const handleLoadSegments = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        if (
+          data?.type !== "FeatureCollection" ||
+          !Array.isArray(data.features)
+        ) {
+          throw new Error("Not a GeoJSON FeatureCollection.");
+        }
+        const lineFeatures = data.features.filter(
+          (f: { geometry?: { type?: string } }) =>
+            f?.geometry?.type === "LineString"
+        );
+        if (lineFeatures.length === 0) {
+          throw new Error("No LineString features with scores found.");
+        }
+        setSegments({ type: "FeatureCollection", features: lineFeatures });
+        setSegmentsError(null);
+      } catch (err) {
+        setSegments(null);
+        setSegmentsError(
+          err instanceof Error ? err.message : "Failed to parse file."
+        );
+      }
+    };
+    reader.onerror = () => setSegmentsError("Failed to read file.");
+    reader.readAsText(file);
+  }, []);
+
+  const handleExportPng = useCallback(async () => {
+    setExporting(true);
+    try {
+      await mapViewRef.current?.exportAreaPng();
+    } catch (err) {
+      console.error(err);
+      setSegmentsError(
+        err instanceof Error ? err.message : "Export failed."
+      );
+    } finally {
+      setExporting(false);
+    }
   }, []);
 
   if (loading) {
@@ -198,6 +272,10 @@ export default function HomePage() {
         stripMode={stripMode}
         stripSelectedIds={stripSelectedIds}
         onToggleStripPoint={handleToggleStripPoint}
+        accessMode={accessMode}
+        areaPoints={areaPoints}
+        segments={segments}
+        onAddAreaPoint={handleAddAreaPoint}
       />
 
       {/* Top bar: title + search */}
@@ -230,6 +308,18 @@ export default function HomePage() {
           title="Pick points to merge into a continuous strip"
         >
           {stripMode ? "Strip mode: ON" : "Strip mode"}
+        </button>
+
+        <button
+          onClick={toggleAccessMode}
+          className={`rounded-lg border px-4 py-2 text-sm font-medium backdrop-blur-sm transition-colors ${
+            accessMode
+              ? "border-emerald-500/60 bg-emerald-600/80 text-white"
+              : "border-neutral-700/50 bg-neutral-900/80 text-neutral-200 hover:text-white"
+          }`}
+          title="Pick a 4-corner area and color street segments by accessibility score"
+        >
+          {accessMode ? "Accessibility: ON" : "Accessibility map"}
         </button>
       </div>
 
@@ -274,6 +364,18 @@ export default function HomePage() {
             )}
           </div>
         </div>
+      )}
+
+      {accessMode && (
+        <AccessibilityPanel
+          segmentCount={segments?.features.length ?? null}
+          loadError={segmentsError}
+          areaPointCount={areaPoints.length}
+          onLoadFile={handleLoadSegments}
+          onClearArea={handleClearArea}
+          onExport={handleExportPng}
+          exporting={exporting}
+        />
       )}
 
       <StripBuilder

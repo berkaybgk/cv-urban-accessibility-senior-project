@@ -1,0 +1,86 @@
+{
+  "type": "FeatureCollection",
+  "name": "Moda, Kadikoy - dummy accessibility scores",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "moda-cad-1", "name": "Moda Caddesi (N)", "score": 0.88 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0265, 40.9855], [29.0270, 40.9842], [29.0276, 40.9830]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "moda-cad-2", "name": "Moda Caddesi (S)", "score": 0.74 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0276, 40.9830], [29.0282, 40.9818], [29.0288, 40.9806]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "bahariye-1", "name": "Bahariye Caddesi", "score": 0.91 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0238, 40.9852], [29.0258, 40.9848], [29.0279, 40.9844]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "dr-esat-1", "name": "Dr. Esat Isik Caddesi", "score": 0.62 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0292, 40.9851], [29.0298, 40.9836], [29.0305, 40.9821]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "sair-latifi-1", "name": "Sair Latifi Sokak", "score": 0.41 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0251, 40.9838], [29.0268, 40.9835], [29.0285, 40.9832]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "ferit-tek-1", "name": "Ferit Tek Sokak", "score": 0.55 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0247, 40.9826], [29.0264, 40.9823], [29.0281, 40.9820]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "muvakkithane-1", "name": "Muvakkithane Caddesi", "score": 0.30 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0244, 40.9814], [29.0260, 40.9811], [29.0277, 40.9808]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "kadife-1", "name": "Kadife Sokak (Barlar)", "score": 0.22 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0256, 40.9845], [29.0259, 40.9833], [29.0262, 40.9821]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "moda-burnu-1", "name": "Moda Burnu yolu", "score": 0.78 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0231, 40.9808], [29.0240, 40.9799], [29.0252, 40.9792]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "sahil-1", "name": "Moda Sahil yolu", "score": 0.95 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0225, 40.9835], [29.0224, 40.9820], [29.0228, 40.9805], [29.0238, 40.9794]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "damga-1", "name": "Damga Sokak", "score": 0.48 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0288, 40.9844], [29.0291, 40.9830], [29.0295, 40.9816]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "devlik-1", "name": "Devlik Sokak", "score": 0.17 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0270, 40.9849], [29.0273, 40.9837], [29.0276, 40.9825]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "moda-koru-1", "name": "Moda Korusu kenari", "score": 0.83 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0300, 40.9808], [29.0290, 40.9800], [29.0278, 40.9795]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "general-1", "name": "General Mehmet Sokak", "score": 0.66 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0252, 40.9801], [29.0266, 40.9803], [29.0281, 40.9805]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "halil-ethem-1", "name": "Halil Ethem Sokak", "score": 0.37 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0283, 40.9826], [29.0287, 40.9814], [29.0291, 40.9802]] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "celal-ferdi-1", "name": "Celal Ferdi Gokcay Sokak", "score": 0.59 },
+      "geometry": { "type": "LineString", "coordinates": [[29.0240, 40.9832], [29.0243, 40.9820], [29.0246, 40.9808]] }
+    }
+  ]
+}

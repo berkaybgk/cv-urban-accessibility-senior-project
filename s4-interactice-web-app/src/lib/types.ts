@@ -100,6 +100,26 @@ export interface StripEdgesResult {
   tiles: StripTilePreview[];
 }
 
+// --- Accessibility map (scored street segments) ---
+
+export interface ScoredSegment {
+  type: "Feature";
+  geometry: {
+    type: "LineString";
+    coordinates: [number, number][];
+  };
+  properties: {
+    id?: string;
+    score: number;
+    [key: string]: unknown;
+  };
+}
+
+export interface ScoredSegmentCollection {
+  type: "FeatureCollection";
+  features: ScoredSegment[];
+}
+
 export interface FootprintMetadata {
   segment: string;
   rectified_height: number;
