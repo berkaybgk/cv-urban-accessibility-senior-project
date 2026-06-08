@@ -93,6 +93,7 @@ interface MapViewProps {
   segments?: ScoredSegmentCollection | null;
   onAddAreaPoint?: (lngLat: LngLat) => void;
   metric?: ScoreMetric;
+  hidePoints?: boolean;
 }
 
 /**
@@ -234,6 +235,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     segments = null,
     onAddAreaPoint,
     metric = "walkability_score",
+    hidePoints = false,
   },
   ref
 ) {
@@ -468,6 +470,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         <Layer
           id="point-circles"
           type="circle"
+          layout={{ visibility: hidePoints ? "none" : "visible" }}
           paint={{
             "circle-radius": [
               "interpolate",

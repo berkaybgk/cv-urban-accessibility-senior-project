@@ -14,6 +14,8 @@ interface AccessibilityPanelProps {
   onClearArea: () => void;
   onExport: () => void;
   exporting: boolean;
+  hidePoints: boolean;
+  onToggleHidePoints: () => void;
 }
 
 const METRICS: ScoreMetric[] = ["walkability_score", "wheelchair_score"];
@@ -29,6 +31,8 @@ export default function AccessibilityPanel({
   onClearArea,
   onExport,
   exporting,
+  hidePoints,
+  onToggleHidePoints,
 }: AccessibilityPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -96,6 +100,14 @@ export default function AccessibilityPanel({
         Pick 4 corners on the map:{" "}
         <span className="font-semibold">{areaPointCount}/4</span>
       </p>
+
+      {/* Hide point markers (cleaner PNG export) */}
+      <button
+        onClick={onToggleHidePoints}
+        className="mb-3 w-full rounded-md border border-neutral-700 px-2 py-1 text-[11px] hover:bg-neutral-800"
+      >
+        {hidePoints ? "Show point markers" : "Hide point markers"}
+      </button>
 
       {/* Legend */}
       <div className="mb-3 space-y-1">

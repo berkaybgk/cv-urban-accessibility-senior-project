@@ -86,6 +86,7 @@ export default function HomePage() {
   const [segments, setSegments] = useState<ScoredSegmentCollection | null>(null);
   const [segmentsError, setSegmentsError] = useState<string | null>(null);
   const [metric, setMetric] = useState<ScoreMetric>("walkability_score");
+  const [hidePoints, setHidePoints] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const mapViewRef = useRef<MapViewHandle>(null);
@@ -316,6 +317,7 @@ export default function HomePage() {
         segments={segments}
         onAddAreaPoint={handleAddAreaPoint}
         metric={metric}
+        hidePoints={hidePoints}
       />
 
       {/* Top bar: title + search */}
@@ -418,6 +420,8 @@ export default function HomePage() {
           onClearArea={handleClearArea}
           onExport={handleExportPng}
           exporting={exporting}
+          hidePoints={hidePoints}
+          onToggleHidePoints={() => setHidePoints((v) => !v)}
         />
       )}
 
