@@ -371,13 +371,41 @@ def component_ground_anchor(component: np.ndarray, direction: str) -> tuple[floa
     raise ValueError(f"Unknown direction for footprint anchor: {direction}")
 
 
+PREDEFINED_OBSTACLE_DIMENSIONS: dict[str, dict[str, float]] = {
+    "bollard": {"width": 0.3, "depth": 0.3, "height": 0.9},
+    "car": {"width": 1.8, "depth": 4.5, "height": 1.4},
+    "lamp_post": {"width": 0.4, "depth": 0.4, "height": 6.0},
+    "pedestrian": {"width": 0.6, "depth": 0.5, "height": 1.7},
+    "pedestrian_crossing": {"width": 3.0, "depth": 3.0, "height": 0.05},
+    "road": {"width": 6.0, "depth": 6.0, "height": 0.05},
+    "sidewalk": {"width": 2.0, "depth": 2.0, "height": 0.1},
+    "traffic_light": {"width": 0.3, "depth": 0.3, "height": 3.0},
+    "traffic_sign": {"width": 0.5, "depth": 0.1, "height": 2.2},
+    "street_sign": {"width": 0.5, "depth": 0.1, "height": 2.2},
+    "trash_container": {"width": 0.8, "depth": 0.8, "height": 1.2},
+    "tree": {"width": 2.0, "depth": 2.0, "height": 4.0},
+    "bench": {"width": 1.5, "depth": 0.6, "height": 0.7},
+}
+
+
 def estimate_width_footprint(mask: np.ndarray, direction: str, is_tree: bool = False,
                              base_scan_ratio: float = FOOTPRINT_BASE_SCAN_RATIO,
                              trunk_scan_ratio: float = TREE_TRUNK_SCAN_RATIO,
                              aspect_ratio: float = FOOTPRINT_ASPECT_RATIO,
-                             max_height: int = FOOTPRINT_MAX_HEIGHT) -> tuple[np.ndarray, list[tuple[float, float]]]:
+                             max_height: int = FOOTPRINT_MAX_HEIGHT,
+                             class_name: str | None = None,
+                             pxToMeter: float | None = None) -> tuple[np.ndarray, list[tuple[float, float]]]:
     footprint = np.zeros_like(mask, dtype=bool)
     anchors: list[tuple[float, float]] = []
+
+    predefined_w_px = None
+    predefined_d_px = None
+    if class_name is not None and pxToMeter is not None:
+        clean_class = class_name.lower().replace(" ", "_").replace("-", "_")
+        if clean_class in PREDEFINED_OBSTACLE_DIMENSIONS:
+            dims = PREDEFINED_OBSTACLE_DIMENSIONS[clean_class]
+            predefined_w_px = dims["width"] / pxToMeter
+            predefined_d_px = dims["depth"] / pxToMeter
 
     for component_id, component, bbox in connected_components(mask):
         min_row, min_col, max_row, max_col = bbox
@@ -407,8 +435,16 @@ def estimate_width_footprint(mask: np.ndarray, direction: str, is_tree: bool = F
             if not row_widths:
                 continue
 
-            fp_width = max(int(np.median(row_widths)), 1)
-            fp_height = min(max(1, int(fp_width * aspect_ratio)), height, max_height)
+            if predefined_w_px is not None:
+                fp_width = max(1, int(round(predefined_w_px)))
+            else:
+                fp_width = max(int(np.median(row_widths)), 1)
+
+            if predefined_d_px is not None:
+                fp_height = max(1, int(round(predefined_d_px)))
+            else:
+                fp_height = min(max(1, int(fp_width * aspect_ratio)), height, max_height)
+
             median_center = float(np.median(row_centers))
             fp_top = max(0, max_row - fp_height) if direction == "forward" else min_row
             fp_bottom = max_row if direction == "forward" else min(mask.shape[0], min_row + fp_height)
@@ -435,8 +471,16 @@ def estimate_width_footprint(mask: np.ndarray, direction: str, is_tree: bool = F
             if not col_heights:
                 continue
 
-            fp_height = max(int(np.median(col_heights)), 1)
-            fp_width = min(max(1, int(fp_height * aspect_ratio)), width, max_height)
+            if predefined_d_px is not None:
+                fp_height = max(1, int(round(predefined_d_px)))
+            else:
+                fp_height = max(int(np.median(col_heights)), 1)
+
+            if predefined_w_px is not None:
+                fp_width = max(1, int(round(predefined_w_px)))
+            else:
+                fp_width = min(max(1, int(fp_height * aspect_ratio)), width, max_height)
+
             median_center = float(np.median(col_centers))
             fp_top = max(0, int(median_center - fp_height / 2.0))
             fp_bottom = min(mask.shape[0], fp_top + fp_height)
@@ -456,7 +500,8 @@ def build_tile_footprints(obstacles: list[dict[str, Any]], sidewalk_mask: np.nda
                           direction: str, method: str, canvas_width: int, target_width: int,
                           robust_warp: dict[str, Any] | None = None,
                           edge_override: dict[str, float] | None = None,
-                          flip_180: bool = False) -> list[dict[str, Any]]:
+                          flip_180: bool = False,
+                          pxToMeter: float | None = None) -> list[dict[str, Any]]:
     footprints: list[dict[str, Any]] = []
     for obs in obstacles:
         rect_full = rectify_obstacle_mask(obs["mask"], sidewalk_mask, direction, method, target_width,
@@ -465,7 +510,8 @@ def build_tile_footprints(obstacles: list[dict[str, Any]], sidewalk_mask: np.nda
             rect_full = cv2.flip(rect_full.astype(np.uint8), -1).astype(bool)
         rect_full = normalize_mask_width(rect_full, canvas_width)
         is_tree = any(t in obs["class_name"].lower() for t in OBSTACLE_IS_TREE)
-        footprint, anchors = estimate_width_footprint(rect_full, direction, is_tree=is_tree)
+        footprint, anchors = estimate_width_footprint(rect_full, direction, is_tree=is_tree,
+                                                      class_name=obs["class_name"], pxToMeter=pxToMeter)
         if not footprint.any():
             continue
         footprints.append({
@@ -571,12 +617,14 @@ def edge_frame(img: np.ndarray, mask: np.ndarray, direction: str, method: str) -
 def build_tile(ctx: PipelineContext, side_strip: str, point_id: str, direction: str,
                selected_side: str, method: str,
                edge_override: dict[str, float] | None = None,
-               flip_180: bool | None = None) -> TileResult:
+               flip_180: bool | None = None,
+               avg_sidewalk_width_m: float = 2.0) -> TileResult:
     point_id = normalize_point_id(point_id)
     if flip_180 is None:
         flip_180 = direction == "backward"
     canvas_width = ctx.cfg.canvas_width
     target_width = ctx.cfg.target_sidewalk_width_px
+    pxToMeter = avg_sidewalk_width_m / target_width
     label_prefix = f"strip={side_strip} | point={point_id} | view={direction} | side={selected_side} | {method}"
 
     row = ctx.manifest.get(point_id, {}).get(direction)
@@ -618,7 +666,7 @@ def build_tile(ctx: PipelineContext, side_strip: str, point_id: str, direction: 
         footprints = build_tile_footprints(
             assigned_obstacles, mask_item["mask"], direction, method, canvas_width, target_width,
             robust_warp=rect_meta.get("robust_warp") if isinstance(rect_meta, dict) else None,
-            edge_override=edge_override, flip_180=flip_180,
+            edge_override=edge_override, flip_180=flip_180, pxToMeter=pxToMeter
         )
         clean_img = rect_img.copy()
         clean_mask = rect_mask.copy()

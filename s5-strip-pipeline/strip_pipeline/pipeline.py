@@ -62,14 +62,20 @@ def _valid_band(frame_mask: np.ndarray) -> tuple[int, int]:
 
 def _lines_to_endpoints(model: dict[str, float], frame_mask: np.ndarray) -> dict[str, dict[str, float]]:
     y_top, y_bottom = _valid_band(frame_mask)
+    H, W = frame_mask.shape[:2]
+
+    def _x(a: float, b: float, y: float) -> float:
+        """Evaluate x = a*y + b, clamped to [0, W-1] so handles stay inside the image."""
+        return float(np.clip(a * y + b, 0.0, W - 1))
+
     return {
         "left": {
-            "xTop": model["a_L"] * y_top + model["b_L"], "yTop": float(y_top),
-            "xBottom": model["a_L"] * y_bottom + model["b_L"], "yBottom": float(y_bottom),
+            "xTop": _x(model["a_L"], model["b_L"], y_top), "yTop": float(y_top),
+            "xBottom": _x(model["a_L"], model["b_L"], y_bottom), "yBottom": float(y_bottom),
         },
         "right": {
-            "xTop": model["a_R"] * y_top + model["b_R"], "yTop": float(y_top),
-            "xBottom": model["a_R"] * y_bottom + model["b_R"], "yBottom": float(y_bottom),
+            "xTop": _x(model["a_R"], model["b_R"], y_top), "yTop": float(y_top),
+            "xBottom": _x(model["a_R"], model["b_R"], y_bottom), "yBottom": float(y_bottom),
         },
     }
 
@@ -189,7 +195,8 @@ def build_strip(ctx: PipelineContext, point_ids: list[str],
     if upload:
         gcs_prefix = f"{ctx.cfg.strips_gcs_prefix.rstrip('/')}/{strip_id}/"
         for name, data in outputs.items():
-            ctx.gcs.upload_bytes(f"{gcs_prefix}{name}", data, content_type="image/png")
+            content_type = "application/json" if name.endswith(".json") else "image/png"
+            ctx.gcs.upload_bytes(f"{gcs_prefix}{name}", data, content_type=content_type)
 
     zip_buf = io.BytesIO()
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:

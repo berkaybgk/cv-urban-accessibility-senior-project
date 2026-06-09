@@ -8,11 +8,14 @@ import type {
   Direction,
   AnalysisResult,
   AlternativeWidthResult,
+  ScoredSegmentCollection,
 } from "@/lib/types";
 import type { MapViewHandle } from "@/components/MapView";
 import AnalysisPanel from "@/components/AnalysisPanel";
 import PointSearch from "@/components/PointSearch";
 import StripBuilder from "@/components/StripBuilder";
+import AccessibilityPanel from "@/components/AccessibilityPanel";
+import { type LngLat, type ScoreMetric, calculateLineStringLength } from "@/lib/geo";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -77,6 +80,14 @@ export default function HomePage() {
   const [stripMode, setStripMode] = useState(false);
   const [stripSelectedIds, setStripSelectedIds] = useState<string[]>([]);
   const [stripBuilderOpen, setStripBuilderOpen] = useState(false);
+
+  const [accessMode, setAccessMode] = useState(false);
+  const [areaPoints, setAreaPoints] = useState<LngLat[]>([]);
+  const [segments, setSegments] = useState<ScoredSegmentCollection | null>(null);
+  const [segmentsError, setSegmentsError] = useState<string | null>(null);
+  const [metric, setMetric] = useState<ScoreMetric>("walkability_score");
+  const [hidePoints, setHidePoints] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -161,9 +172,124 @@ export default function HomePage() {
       const next = !on;
       if (next) {
         setPanelOpen(false);
+        setAccessMode(false);
       }
       return next;
     });
+  }, []);
+
+  const toggleAccessMode = useCallback(() => {
+    setAccessMode((on) => {
+      const next = !on;
+      if (next) {
+        setPanelOpen(false);
+        setStripMode(false);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleAddAreaPoint = useCallback((lngLat: LngLat) => {
+    setAreaPoints((prev) => (prev.length >= 4 ? prev : [...prev, lngLat]));
+  }, []);
+
+  const handleClearArea = useCallback(() => {
+    setAreaPoints([]);
+  }, []);
+
+  const handleLoadFiles = useCallback((files: FileList) => {
+    const readText = (file: File) =>
+      new Promise<{ name: string; text: string }>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ name: file.name, text: String(reader.result) });
+        reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+        reader.readAsText(file);
+      });
+
+    Promise.all(Array.from(files).map(readText))
+      .then((results) => {
+        type LineFeature = ScoredSegmentCollection["features"][number];
+        const newFeatures: LineFeature[] = [];
+        const badFiles: string[] = [];
+
+        for (const { name, text } of results) {
+          try {
+            const data = JSON.parse(text);
+            if (data?.type !== "FeatureCollection" || !Array.isArray(data.features)) {
+              throw new Error("not a FeatureCollection");
+            }
+            const lines = (data.features as LineFeature[]).filter(
+              (f) => f?.geometry?.type === "LineString"
+            );
+            if (lines.length === 0) throw new Error("no LineStrings");
+
+            // Calculate length using Haversine distance formula
+            lines.forEach((f) => {
+              if (f.geometry && f.geometry.coordinates) {
+                const len = calculateLineStringLength(f.geometry.coordinates as [number, number][]);
+                f.properties = {
+                  ...f.properties,
+                  calculated_length_m: len,
+                };
+              }
+            });
+
+            newFeatures.push(...lines);
+          } catch {
+            badFiles.push(name);
+          }
+        }
+
+        if (newFeatures.length === 0) {
+          setSegmentsError(
+            `No LineString features found in ${badFiles.join(", ") || "the selection"}.`
+          );
+          return;
+        }
+
+        // Merge with whatever is already loaded, de-duping by feature id
+        // (last one wins). Features without an id are always kept.
+        setSegments((prev) => {
+          const byId = new Map<string, LineFeature>();
+          const anon: LineFeature[] = [];
+          const add = (f: LineFeature) => {
+            const id = f.properties?.id;
+            if (typeof id === "string") byId.set(id, f);
+            else anon.push(f);
+          };
+          prev?.features.forEach(add);
+          newFeatures.forEach(add);
+          return {
+            type: "FeatureCollection",
+            features: [...byId.values(), ...anon],
+          };
+        });
+        setSegmentsError(
+          badFiles.length ? `Skipped (no LineStrings): ${badFiles.join(", ")}` : null
+        );
+      })
+      .catch((err) =>
+        setSegmentsError(err instanceof Error ? err.message : "Failed to read files.")
+      );
+  }, []);
+
+  const handleClearSegments = useCallback(() => {
+    setSegments(null);
+    setSegmentsError(null);
+  }, []);
+
+  const handleExportPng = useCallback(async () => {
+    setExporting(true);
+    try {
+      await mapViewRef.current?.exportAreaPng();
+    } catch (err) {
+      console.error(err);
+      setSegmentsError(
+        err instanceof Error ? err.message : "Export failed."
+      );
+    } finally {
+      setExporting(false);
+    }
   }, []);
 
   if (loading) {
@@ -198,6 +324,12 @@ export default function HomePage() {
         stripMode={stripMode}
         stripSelectedIds={stripSelectedIds}
         onToggleStripPoint={handleToggleStripPoint}
+        accessMode={accessMode}
+        areaPoints={areaPoints}
+        segments={segments}
+        onAddAreaPoint={handleAddAreaPoint}
+        metric={metric}
+        hidePoints={hidePoints}
       />
 
       {/* Top bar: title + search */}
@@ -230,6 +362,18 @@ export default function HomePage() {
           title="Pick points to merge into a continuous strip"
         >
           {stripMode ? "Strip mode: ON" : "Strip mode"}
+        </button>
+
+        <button
+          onClick={toggleAccessMode}
+          className={`rounded-lg border px-4 py-2 text-sm font-medium backdrop-blur-sm transition-colors ${
+            accessMode
+              ? "border-emerald-500/60 bg-emerald-600/80 text-white"
+              : "border-neutral-700/50 bg-neutral-900/80 text-neutral-200 hover:text-white"
+          }`}
+          title="Pick a 4-corner area and color street segments by accessibility score"
+        >
+          {accessMode ? "Accessibility: ON" : "Accessibility map"}
         </button>
       </div>
 
@@ -274,6 +418,23 @@ export default function HomePage() {
             )}
           </div>
         </div>
+      )}
+
+      {accessMode && (
+        <AccessibilityPanel
+          segmentCount={segments?.features.length ?? null}
+          loadError={segmentsError}
+          areaPointCount={areaPoints.length}
+          metric={metric}
+          onMetricChange={setMetric}
+          onLoadFiles={handleLoadFiles}
+          onClearSegments={handleClearSegments}
+          onClearArea={handleClearArea}
+          onExport={handleExportPng}
+          exporting={exporting}
+          hidePoints={hidePoints}
+          onToggleHidePoints={() => setHidePoints((v) => !v)}
+        />
       )}
 
       <StripBuilder

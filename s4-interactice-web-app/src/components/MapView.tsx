@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useImperativeHandle, useRef, useState, forwardRef } from "react";
+import {
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  forwardRef,
+} from "react";
 import Map, {
   Layer,
   Source,
@@ -9,7 +16,23 @@ import Map, {
   MapLayerMouseEvent,
 } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { PointData, PointsHashMap, Direction } from "@/lib/types";
+import type {
+  PointData,
+  PointsHashMap,
+  Direction,
+  ScoredSegmentCollection,
+} from "@/lib/types";
+import {
+  SCORE_COLORS,
+  SCORE_THRESHOLDS,
+  SCORE_LEGEND,
+  METRIC_LABELS,
+  bboxOf,
+  segmentInPolygon,
+  getLineStringMidpoint,
+  type LngLat,
+  type ScoreMetric,
+} from "@/lib/geo";
 
 const DIRECTION_LABELS: Record<Direction, string> = {
   forward: "Forward",
@@ -56,6 +79,7 @@ const MAP_STYLES: MapStyle[] = [
 
 export interface MapViewHandle {
   flyToPoint: (point: PointData) => void;
+  exportAreaPng: () => Promise<void>;
 }
 
 interface MapViewProps {
@@ -65,6 +89,219 @@ interface MapViewProps {
   stripMode?: boolean;
   stripSelectedIds?: string[];
   onToggleStripPoint?: (pointId: string) => void;
+  accessMode?: boolean;
+  areaPoints?: LngLat[];
+  segments?: ScoredSegmentCollection | null;
+  onAddAreaPoint?: (lngLat: LngLat) => void;
+  metric?: ScoreMetric;
+  hidePoints?: boolean;
+}
+
+/**
+ * MapLibre `step` expression coloring each segment by the chosen metric.
+ * Falls back to the generic `score` field for files that predate the two-score
+ * format (e.g. single-metric exports).
+ */
+function segmentColorExpr(metric: ScoreMetric) {
+  return [
+    "step",
+    ["coalesce", ["get", metric], ["get", "score"], 0],
+    SCORE_COLORS.red,
+    SCORE_THRESHOLDS.low,
+    SCORE_COLORS.yellow,
+    SCORE_THRESHOLDS.high,
+    SCORE_COLORS.green,
+  ] as const;
+}
+
+const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
+
+/** Draw the score legend (with a metric title) onto an export canvas (bottom-left). */
+function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string) {
+  const pad = 10;
+  const titleH = 20;
+  const rowH = 20;
+  const swatch = 12;
+  const boxW = 180;
+  const boxH = pad * 2 + titleH + SCORE_LEGEND.length * rowH;
+  const x = pad;
+  const y = height - boxH - pad;
+
+  ctx.fillStyle = "rgba(17,17,17,0.82)";
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, boxW, boxH);
+  ctx.strokeRect(x, y, boxW, boxH);
+
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText(title, x + pad, y + pad + titleH / 2);
+
+  ctx.font = "12px sans-serif";
+  SCORE_LEGEND.forEach((b, i) => {
+    const ry = y + pad + titleH + i * rowH + rowH / 2;
+    ctx.fillStyle = b.color;
+    ctx.fillRect(x + pad, ry - swatch / 2, swatch, swatch);
+    ctx.fillStyle = "#ffffff";
+  });
+}
+
+interface AreaStats {
+  count: number;
+  totalLength: number;
+  avgWalkability: number;
+  avgWheelchair: number;
+  avgMinWidth: number;
+  passablePercent: number;
+  adaPercent: number;
+  totalDrops: number;
+}
+
+function calculateAreaStats(features: any[]): AreaStats {
+  let count = 0;
+  let totalLength = 0;
+  let sumWalkability = 0;
+  let sumWheelchair = 0;
+  let sumMinWidth = 0;
+  let minWidthCount = 0;
+  let passableCount = 0;
+  let adaCount = 0;
+  let totalDrops = 0;
+
+  features.forEach((f) => {
+    const props = f.properties || {};
+    count++;
+
+    const length =
+      typeof props.calculated_length_m === "number"
+        ? props.calculated_length_m
+        : typeof props.strip_length_m === "number"
+          ? props.strip_length_m
+          : 0;
+    totalLength += length;
+
+    const walkability =
+      typeof props.walkability_score === "number"
+        ? props.walkability_score
+        : typeof props.score === "number"
+          ? props.score
+          : 0;
+    sumWalkability += walkability;
+
+    const wheelchair = typeof props.wheelchair_score === "number" ? props.wheelchair_score : 0;
+    sumWheelchair += wheelchair;
+
+    if (typeof props.min_clear_width_m === "number") {
+      sumMinWidth += props.min_clear_width_m;
+      minWidthCount++;
+    }
+
+    if (props.wheelchair_passable_65cm === true || props.wheelchair_passable_65cm === "true") {
+      passableCount++;
+    }
+
+    if (props.ada_accessible_90cm === true || props.ada_accessible_90cm === "true") {
+      adaCount++;
+    }
+
+    if (typeof props.width_drop_60cm_count === "number") {
+      totalDrops += props.width_drop_60cm_count;
+    }
+  });
+
+  return {
+    count,
+    totalLength,
+    avgWalkability: count > 0 ? sumWalkability / count : 0,
+    avgWheelchair: count > 0 ? sumWheelchair / count : 0,
+    avgMinWidth: minWidthCount > 0 ? sumMinWidth / minWidthCount : 0,
+    passablePercent: count > 0 ? (passableCount / count) * 100 : 0,
+    adaPercent: count > 0 ? (adaCount / count) * 100 : 0,
+    totalDrops,
+  };
+}
+
+function drawSummary(ctx: CanvasRenderingContext2D, width: number, height: number, stats: AreaStats) {
+  const pad = 10;
+  const rowH = 18;
+  const boxW = 200;
+  const titleH = 20;
+  const rows = [
+    `Segments: ${stats.count}`,
+    `Total Length: ${stats.totalLength.toFixed(1)} m`,
+    `Avg Walkability: ${stats.avgWalkability.toFixed(2)}`,
+    `Avg Wheelchair: ${stats.avgWheelchair.toFixed(2)}`,
+    `Avg Min Width: ${stats.avgMinWidth > 0 ? `${stats.avgMinWidth.toFixed(2)} m` : "N/A"}`,
+    `Passable (65cm): ${stats.passablePercent.toFixed(0)}%`,
+    `ADA (90cm): ${stats.adaPercent.toFixed(0)}%`,
+    `Width Drops (<60cm): ${stats.totalDrops}`,
+  ];
+
+  const boxH = pad * 2 + titleH + rows.length * rowH;
+  const x = width - boxW - pad;
+  const y = pad; // Top-right corner
+
+  ctx.fillStyle = "rgba(17,17,17,0.82)";
+  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.lineWidth = 1;
+  ctx.fillRect(x, y, boxW, boxH);
+  ctx.strokeRect(x, y, boxW, boxH);
+
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 13px sans-serif";
+  ctx.fillText("Area Summary", x + pad, y + pad + titleH / 2);
+
+  ctx.font = "11px sans-serif";
+  rows.forEach((row, i) => {
+    const ry = y + pad + titleH + i * rowH + rowH / 2;
+    ctx.fillStyle = "#e5e5e5";
+    ctx.fillText(row, x + pad, ry);
+  });
+}
+
+function createCardImage(): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+
+  const w = 64;
+  const h = 64;
+  const r = 8; // corner radius
+  const pointerH = 8; // pointer height
+  const boxH = h - pointerH; // 56
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Draw the slightly transparent dark gray card
+  ctx.fillStyle = "rgba(20, 20, 20, 0.85)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.lineWidth = 1.5;
+
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(w - r, 0);
+  ctx.quadraticCurveTo(w, 0, w, r);
+  ctx.lineTo(w, boxH - r);
+  ctx.quadraticCurveTo(w, boxH, w - r, boxH);
+
+  // Bottom edge with pointer at the center
+  ctx.lineTo(w / 2 + 6, boxH);
+  ctx.lineTo(w / 2, h); // tip of the pointer pointing to [32, 64]
+  ctx.lineTo(w / 2 - 6, boxH);
+  ctx.lineTo(r, boxH);
+  ctx.quadraticCurveTo(0, boxH, 0, boxH - r);
+  ctx.lineTo(0, r);
+  ctx.quadraticCurveTo(0, 0, r, 0);
+  ctx.closePath();
+
+  ctx.fill();
+  ctx.stroke();
+
+  return canvas;
 }
 
 function buildGeoJSON(points: PointsHashMap) {
@@ -104,10 +341,9 @@ function StyleSwitcher({
                 setOpen(false);
               }}
               className={`block w-full text-left px-4 py-2 text-xs font-medium transition-colors
-                ${
-                  current === style.id
-                    ? "bg-neutral-600/40 text-white"
-                    : "text-neutral-300 hover:bg-neutral-700/50 hover:text-white"
+                ${current === style.id
+                  ? "bg-neutral-600/40 text-white"
+                  : "text-neutral-300 hover:bg-neutral-700/50 hover:text-white"
                 }`}
             >
               {style.label}
@@ -143,7 +379,20 @@ function StyleSwitcher({
 }
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
-  { points, onSelectDirection, selectedPointId, stripMode = false, stripSelectedIds = [], onToggleStripPoint },
+  {
+    points,
+    onSelectDirection,
+    selectedPointId,
+    stripMode = false,
+    stripSelectedIds = [],
+    onToggleStripPoint,
+    accessMode = false,
+    areaPoints = [],
+    segments = null,
+    onAddAreaPoint,
+    metric = "walkability_score",
+    hidePoints = false,
+  },
   ref
 ) {
   const mapRef = useRef<MapRef>(null);
@@ -156,23 +405,168 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   const isDarkStyle = styleId === "dark";
 
-  useImperativeHandle(ref, () => ({
-    flyToPoint(point: PointData) {
-      const map = mapRef.current;
-      if (map) {
-        map.flyTo({
-          center: [point.longitude, point.latitude],
-          zoom: 17,
-          duration: 1200,
-        });
-      }
-      setPopupPoint(point);
-    },
-  }));
+  const colorExpr = useMemo(() => segmentColorExpr(metric), [metric]);
+
+  // Segments to color: all of them until an area is drawn, then only those inside.
+  const segmentsFC = useMemo(() => {
+    if (!segments) return EMPTY_FC;
+    if (areaPoints.length < 3) return segments;
+    return {
+      type: "FeatureCollection" as const,
+      features: segments.features.filter((f) =>
+        segmentInPolygon(f.geometry.coordinates as LngLat[], areaPoints)
+      ),
+    };
+  }, [segments, areaPoints]);
+
+  const labelPointsFC = useMemo(() => {
+    if (!segmentsFC || !segmentsFC.features) return EMPTY_FC;
+    return {
+      type: "FeatureCollection" as const,
+      features: segmentsFC.features.map((f) => ({
+        type: "Feature" as const,
+        geometry: {
+          type: "Point" as const,
+          coordinates: getLineStringMidpoint(f.geometry.coordinates as LngLat[]),
+        },
+        properties: f.properties,
+      })),
+    };
+  }, [segmentsFC]);
+
+  const areaPolygonFC = useMemo(() => {
+    if (areaPoints.length < 3) return EMPTY_FC;
+    return {
+      type: "FeatureCollection" as const,
+      features: [
+        {
+          type: "Feature" as const,
+          properties: {},
+          geometry: {
+            type: "Polygon" as const,
+            coordinates: [[...areaPoints, areaPoints[0]]],
+          },
+        },
+      ],
+    };
+  }, [areaPoints]);
+
+  const areaCornersFC = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: areaPoints.map((c) => ({
+        type: "Feature" as const,
+        properties: {},
+        geometry: { type: "Point" as const, coordinates: c },
+      })),
+    }),
+    [areaPoints]
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      flyToPoint(point: PointData) {
+        const map = mapRef.current;
+        if (map) {
+          map.flyTo({
+            center: [point.longitude, point.latitude],
+            zoom: 17,
+            duration: 1200,
+          });
+        }
+        setPopupPoint(point);
+      },
+      async exportAreaPng() {
+        const map = mapRef.current?.getMap();
+        if (!map) throw new Error("Map is not ready.");
+        if (areaPoints.length !== 4) {
+          throw new Error("Pick 4 corners on the map first.");
+        }
+
+        // Hide green selected region layers
+        try {
+          if (map.getLayer("area-fill")) map.setLayoutProperty("area-fill", "visibility", "none");
+          if (map.getLayer("area-outline")) map.setLayoutProperty("area-outline", "visibility", "none");
+          if (map.getLayer("area-corner-circles")) map.setLayoutProperty("area-corner-circles", "visibility", "none");
+        } catch (err) {
+          console.error("Failed to hide selection layers:", err);
+        }
+
+        try {
+          const [minLng, minLat, maxLng, maxLat] = bboxOf(areaPoints);
+          map.fitBounds(
+            [
+              [minLng, minLat],
+              [maxLng, maxLat],
+            ],
+            { padding: 48, animate: false }
+          );
+          await new Promise<void>((resolve) => map.once("idle", () => resolve()));
+
+          const canvas = map.getCanvas();
+          const scaleX = canvas.width / canvas.clientWidth;
+          const scaleY = canvas.height / canvas.clientHeight;
+          const projected = areaPoints.map((c) => map.project(c));
+          const xs = projected.map((p) => p.x);
+          const ys = projected.map((p) => p.y);
+          const sx = Math.max(0, Math.floor(Math.min(...xs) * scaleX));
+          const sy = Math.max(0, Math.floor(Math.min(...ys) * scaleY));
+          const sw = Math.min(
+            canvas.width - sx,
+            Math.ceil((Math.max(...xs) - Math.min(...xs)) * scaleX)
+          );
+          const sh = Math.min(
+            canvas.height - sy,
+            Math.ceil((Math.max(...ys) - Math.min(...ys)) * scaleY)
+          );
+
+          const out = document.createElement("canvas");
+          out.width = Math.max(1, sw);
+          out.height = Math.max(1, sh);
+          const ctx = out.getContext("2d");
+          if (!ctx) throw new Error("Could not create export canvas.");
+          ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+          drawLegend(ctx, out.height, METRIC_LABELS[metric]);
+
+          // Draw stats summary card
+          const stats = calculateAreaStats(segmentsFC.features);
+          drawSummary(ctx, out.width, out.height, stats);
+
+          let url: string;
+          try {
+            url = out.toDataURL("image/png");
+          } catch {
+            throw new Error(
+              "Export blocked by the basemap (CORS). Switch to the Light or Voyager style and retry."
+            );
+          }
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `accessibility-${metric}.png`;
+          a.click();
+        } finally {
+          // Restore green selected region layers
+          try {
+            if (map.getLayer("area-fill")) map.setLayoutProperty("area-fill", "visibility", "visible");
+            if (map.getLayer("area-outline")) map.setLayoutProperty("area-outline", "visibility", "visible");
+            if (map.getLayer("area-corner-circles")) map.setLayoutProperty("area-corner-circles", "visibility", "visible");
+          } catch (err) {
+            console.error("Failed to restore selection layers:", err);
+          }
+        }
+      },
+    }),
+    [areaPoints, metric, segmentsFC]
+  );
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
       const feature = e.features?.[0];
+      if (accessMode) {
+        if (!feature) onAddAreaPoint?.([e.lngLat.lng, e.lngLat.lat]);
+        return;
+      }
       if (!feature || !feature.properties) {
         if (!stripMode) setPopupPoint(null);
         return;
@@ -185,7 +579,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const pt = points[pid];
       if (pt) setPopupPoint(pt);
     },
-    [points, stripMode, onToggleStripPoint]
+    [points, stripMode, accessMode, onAddAreaPoint, onToggleStripPoint]
   );
 
   const handleMouseEnter = useCallback(() => {
@@ -196,6 +590,37 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const handleMouseLeave = useCallback(() => {
     const map = mapRef.current?.getMap();
     if (map) map.getCanvas().style.cursor = "";
+  }, []);
+
+  const handleMapLoad = useCallback((e: any) => {
+    const map = e.target;
+    const addedImages = new Set<string>();
+
+    map.on("styledata", () => {
+      addedImages.clear();
+    });
+
+    map.on("styleimagemissing", (ev: any) => {
+      if (ev.id === "card-bg") {
+        if (!addedImages.has("card-bg") && !map.hasImage("card-bg")) {
+          addedImages.add("card-bg");
+          const img = createCardImage();
+          const ctx = img.getContext("2d");
+          if (ctx) {
+            try {
+              const imgData = ctx.getImageData(0, 0, img.width, img.height);
+              map.addImage("card-bg", imgData, {
+                stretchX: [[10, 24], [40, 54]],
+                stretchY: [[10, 46]],
+              });
+            } catch (err) {
+              console.error("Failed to add speech bubble image to map style:", err);
+              addedImages.delete("card-bg");
+            }
+          }
+        }
+      }
+    });
   }, []);
 
   return (
@@ -212,11 +637,126 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onLoad={handleMapLoad}
+      preserveDrawingBuffer
     >
+      {accessMode && (
+        <>
+          <Source id="area-polygon" type="geojson" data={areaPolygonFC}>
+            <Layer
+              id="area-fill"
+              type="fill"
+              paint={{ "fill-color": "#10b981", "fill-opacity": 0.08 }}
+            />
+            <Layer
+              id="area-outline"
+              type="line"
+              paint={{
+                "line-color": "#10b981",
+                "line-width": 2,
+                "line-dasharray": [2, 1],
+              }}
+            />
+          </Source>
+
+          <Source id="segments" type="geojson" data={segmentsFC}>
+            <Layer
+              id="segment-lines"
+              type="line"
+              layout={{ "line-cap": "round", "line-join": "round" }}
+              paint={{
+                "line-color": colorExpr as never,
+                "line-width": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  12, 3,
+                  16, 6,
+                  19, 10,
+                ],
+                "line-opacity": 0.95,
+              }}
+            />
+          </Source>
+
+          <Source id="segment-labels-source" type="geojson" data={labelPointsFC}>
+            <Layer
+              id="segment-labels"
+              type="symbol"
+              layout={{
+                "icon-image": "card-bg",
+                "icon-text-fit": "both",
+                "icon-text-fit-padding": [6, 10, 10, 10],
+                "icon-anchor": "center",
+                "text-field": [
+                  "concat",
+                  ["coalesce", ["get", "id"], ""],
+                  " (L: ",
+                  ["number-format", ["coalesce", ["get", "calculated_length_m"], ["get", "strip_length_m"], 0], { "max-fraction-digits": 1 }],
+                  "m)\n",
+                  "Min Width: ",
+                  ["number-format", ["coalesce", ["get", "min_clear_width_m"], 0], { "max-fraction-digits": 2, "min-fraction-digits": 2 }],
+                  "m | Drops: ",
+                  ["to-string", ["coalesce", ["get", "width_drop_60cm_count"], 0]],
+                  "\n",
+                  "Wheelchair: ",
+                  ["case",
+                    ["any",
+                      ["==", ["get", "wheelchair_passable_65cm"], true],
+                      ["==", ["get", "wheelchair_passable_65cm"], "true"]
+                    ],
+                    "Pass",
+                    "Fail"
+                  ],
+                  " | ADA: ",
+                  ["case",
+                    ["any",
+                      ["==", ["get", "ada_accessible_90cm"], true],
+                      ["==", ["get", "ada_accessible_90cm"], "true"]
+                    ],
+                    "Yes",
+                    "No"
+                  ]
+                ],
+                "symbol-placement": "point",
+                "text-size": 10.5,
+                "text-keep-upright": true,
+                "text-anchor": "center",
+                "text-offset": [0, -3.0],
+                "text-justify": "left",
+                "text-rotation-alignment": "viewport",
+                "icon-rotation-alignment": "viewport",
+                "text-allow-overlap": true,
+                "icon-allow-overlap": true,
+                "text-ignore-placement": true,
+                "icon-ignore-placement": true,
+              }}
+              paint={{
+                "text-color": "#ffffff",
+              }}
+            />
+          </Source>
+
+          <Source id="area-corners" type="geojson" data={areaCornersFC}>
+            <Layer
+              id="area-corner-circles"
+              type="circle"
+              paint={{
+                "circle-radius": 6,
+                "circle-color": "#10b981",
+                "circle-stroke-width": 2,
+                "circle-stroke-color": "#ffffff",
+              }}
+            />
+          </Source>
+        </>
+      )}
+
       <Source id="points" type="geojson" data={geojson}>
         <Layer
           id="point-circles"
           type="circle"
+          layout={{ visibility: hidePoints ? "none" : "visible" }}
           paint={{
             "circle-radius": [
               "interpolate",

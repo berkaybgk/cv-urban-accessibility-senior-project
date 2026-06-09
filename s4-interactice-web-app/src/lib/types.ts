@@ -100,6 +100,26 @@ export interface StripEdgesResult {
   tiles: StripTilePreview[];
 }
 
+// --- Accessibility map (scored street segments) ---
+
+export interface ScoredSegment {
+  type: "Feature";
+  geometry: {
+    type: "LineString";
+    coordinates: [number, number][];
+  };
+  properties: {
+    id?: string;
+    score: number;
+    [key: string]: unknown;
+  };
+}
+
+export interface ScoredSegmentCollection {
+  type: "FeatureCollection";
+  features: ScoredSegment[];
+}
+
 export interface FootprintMetadata {
   segment: string;
   rectified_height: number;
@@ -116,3 +136,21 @@ export interface FootprintMetadata {
     reduction_pct: number;
   }[];
 }
+
+export interface ObstacleBox {
+  class_name: string;
+  bbox: [number, number, number, number]; // [min_row, min_col, max_row, max_col]
+  tile_index: number;
+  tile_label: string;
+  method?: string;
+  blob_name?: string;
+}
+
+export interface StripMetadata {
+  width: number;
+  height: number;
+  boxes: ObstacleBox[];
+  target_sidewalk_width_px?: number;
+  avg_sidewalk_width_m?: number;
+}
+
