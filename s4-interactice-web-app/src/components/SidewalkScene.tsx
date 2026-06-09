@@ -38,7 +38,7 @@ const PREDEFINED_DIMENSIONS: Record<
   traffic_sign: { width: 0.5, depth: 0.1, height: 2.2, color: "#0284c7" },
   street_sign: { width: 0.5, depth: 0.1, height: 2.2, color: "#0284c7" }, // alias
   trash_container: { width: 0.8, depth: 0.8, height: 1.2, color: "#3b6e4c" },
-  tree: { width: 2.0, depth: 2.0, height: 4.0, color: "#226622" },
+  tree: { width: 0.8, depth: 0.8, height: 4.0, color: "#226622" },
   bench: { width: 1.5, depth: 0.6, height: 0.7, color: "#8c5630" },
 };
 
@@ -136,12 +136,12 @@ function ObstacleMesh({ box, stripWidth, stripHeight, pxToMeter }: ObstacleProps
         <group position={[x, 0, z]}>
           {/* Trunk */}
           <mesh position={[0, height * 0.22, 0]} castShadow receiveShadow>
-            <cylinderGeometry args={[widthM * 0.08, widthM * 0.11, height * 0.44, 8]} />
+            <cylinderGeometry args={[0.16, 0.22, height * 0.44, 8]} />
             <meshStandardMaterial color="#5c4033" roughness={0.9} />
           </mesh>
           {/* Canopy */}
-          <mesh position={[0, height * 0.7, 0]} castShadow>
-            <sphereGeometry args={[widthM * 0.45, 12, 12]} />
+          <mesh position={[0, height * 0.6, 0]} castShadow>
+            <sphereGeometry args={[0.9, 12, 12]} />
             <meshStandardMaterial color={hovered ? "#3c8a3c" : "#226622"} roughness={0.8} />
           </mesh>
         </group>
@@ -283,7 +283,7 @@ export default function SidewalkScene({
         fov: 50,
       }}
     >
-      <color attach="background" args={["#0a0a0a"]} />
+      <color attach="background" args={["#f1f5f9"]} />
 
       {/* Lighting */}
       <ambientLight intensity={1.2} />

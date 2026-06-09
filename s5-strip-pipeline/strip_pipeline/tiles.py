@@ -372,7 +372,7 @@ def component_ground_anchor(component: np.ndarray, direction: str) -> tuple[floa
 
 
 PREDEFINED_OBSTACLE_DIMENSIONS: dict[str, dict[str, float]] = {
-    "bollard": {"width": 0.3, "depth": 0.3, "height": 0.9},
+    "bollard": {"width": 0.2, "depth": 0.2, "height": 0.9},
     "car": {"width": 1.8, "depth": 4.5, "height": 1.4},
     "lamp_post": {"width": 0.4, "depth": 0.4, "height": 6.0},
     "pedestrian": {"width": 0.6, "depth": 0.5, "height": 1.7},
@@ -383,7 +383,7 @@ PREDEFINED_OBSTACLE_DIMENSIONS: dict[str, dict[str, float]] = {
     "traffic_sign": {"width": 0.5, "depth": 0.1, "height": 2.2},
     "street_sign": {"width": 0.5, "depth": 0.1, "height": 2.2},
     "trash_container": {"width": 0.8, "depth": 0.8, "height": 1.2},
-    "tree": {"width": 2.0, "depth": 2.0, "height": 4.0},
+    "tree": {"width": 0.8, "depth": 0.8, "height": 4.0},
     "bench": {"width": 1.5, "depth": 0.6, "height": 0.7},
 }
 
