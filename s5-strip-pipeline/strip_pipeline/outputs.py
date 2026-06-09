@@ -65,14 +65,13 @@ def _calculate_average_sidewalk_width(ctx: PipelineContext, side: str, ordered_p
 
 
 def build_side_tiles(ctx: PipelineContext, side: str, ordered_points: list[str],
-                     overrides: dict[str, dict[str, float]], avg_sidewalk_width_m: float) -> list[TileResult]:
+                     overrides: dict[str, dict[str, float]]) -> list[TileResult]:
     """Build every TileResult for one side, bottom-to-top, honoring line overrides."""
     results: list[TileResult] = []
     for spec in strip_sequence(side, ordered_points):
         results.append(build_tile(
             ctx, spec.side_strip, spec.point_id, spec.direction, spec.selected_side, spec.method,
-            edge_override=overrides.get(spec.tile_id), flip_180=spec.flip_180,
-            avg_sidewalk_width_m=avg_sidewalk_width_m
+            edge_override=overrides.get(spec.tile_id), flip_180=spec.flip_180
         ))
     return results
 
@@ -108,7 +107,7 @@ def build_all_outputs(ctx: PipelineContext, point_ids: list[str],
     for side in ctx.cfg.sides_to_render:
         avg_w, debug_imgs = _calculate_average_sidewalk_width(ctx, side, ordered)
         outputs.update(debug_imgs)
-        tiles = build_side_tiles(ctx, side, ordered, overrides, avg_w)
+        tiles = build_side_tiles(ctx, side, ordered, overrides)
 
         full = stack_full_strip(tiles, canvas_width)
         outputs[f"{side}_sidewalk_strip_FULL.png"] = png_bytes(full)

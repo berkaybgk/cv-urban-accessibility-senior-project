@@ -62,8 +62,8 @@ function ObstacleMesh({ box, stripWidth, stripHeight, pxToMeter }: ObstacleProps
   const cleanClass = box.class_name.toLowerCase().replace(/[\s-]/g, "_");
   const predefined = PREDEFINED_DIMENSIONS[cleanClass];
 
-  const widthM = predefined ? predefined.width : (maxCol - minCol) * pxToMeter;
-  const depthM = predefined ? predefined.depth : (maxRow - minRow) * pxToMeter;
+  const widthM = (maxCol - minCol) * pxToMeter;
+  const depthM = (maxRow - minRow) * pxToMeter;
   const height = predefined ? predefined.height : 1.0;
   let color = predefined?.color || "#ff6b6b"; // Default color
 
