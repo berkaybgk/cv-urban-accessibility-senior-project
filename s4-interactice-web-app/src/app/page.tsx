@@ -32,7 +32,7 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 async function fetchAnalysis(
   point: PointData,
   direction: Direction
-): Promise<AnalysisResult> {
+): Promise<AnalysisResult | null> {
   const dirData = point.directions[direction];
   const params = new URLSearchParams({
     pointId: point.pointId,
@@ -42,24 +42,34 @@ async function fetchAnalysis(
     ...(dirData ? { originalBlob: dirData.gcsUri } : {}),
   });
 
-  const res = await fetch(`/api/analysis?${params}`);
-  if (!res.ok) throw new Error("Failed to fetch analysis");
-  return res.json();
+  try {
+    const res = await fetch(`/api/analysis?${params}`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch (err) {
+    console.error("fetchAnalysis failed:", err);
+    return null;
+  }
 }
 
 async function fetchAlternativeWidth(
   point: PointData,
   direction: Direction
-): Promise<AlternativeWidthResult> {
+): Promise<AlternativeWidthResult | null> {
   const params = new URLSearchParams({
     pointId: point.pointId,
     direction,
     lat: String(point.latitude),
     lon: String(point.longitude),
   });
-  const res = await fetch(`/api/alt-width?${params}`);
-  if (!res.ok) throw new Error("Failed to fetch alternative width");
-  return res.json();
+  try {
+    const res = await fetch(`/api/alt-width?${params}`);
+    if (!res.ok) return null;
+    return res.json();
+  } catch (err) {
+    console.error("fetchAlternativeWidth failed:", err);
+    return null;
+  }
 }
 
 export default function HomePage() {
@@ -173,6 +183,7 @@ export default function HomePage() {
       if (next) {
         setPanelOpen(false);
         setAccessMode(false);
+        setHidePoints(false);
       }
       return next;
     });
@@ -184,6 +195,8 @@ export default function HomePage() {
       if (next) {
         setPanelOpen(false);
         setStripMode(false);
+      } else {
+        setHidePoints(false);
       }
       return next;
     });

@@ -122,7 +122,7 @@ function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string
   const titleH = 20;
   const rowH = 20;
   const swatch = 12;
-  const boxW = 180;
+  const boxW = 240;
   const boxH = pad * 2 + titleH + SCORE_LEGEND.length * rowH;
   const x = pad;
   const y = height - boxH - pad;
@@ -144,6 +144,7 @@ function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string
     ctx.fillStyle = b.color;
     ctx.fillRect(x + pad, ry - swatch / 2, swatch, swatch);
     ctx.fillStyle = "#ffffff";
+    ctx.fillText(`${b.label} (${b.range})`, x + pad + swatch + 8, ry);
   });
 }
 
@@ -264,21 +265,21 @@ function drawSummary(ctx: CanvasRenderingContext2D, width: number, height: numbe
 function createCardImage(): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
-  canvas.height = 64;
+  canvas.height = 96;
   const ctx = canvas.getContext("2d");
   if (!ctx) return canvas;
 
   const w = 64;
-  const h = 64;
+  const h = 96;
   const r = 8; // corner radius
-  const pointerH = 8; // pointer height
-  const boxH = h - pointerH; // 56
+  const pointerH = 48; // pointer height
+  const boxH = h - pointerH; // 48
 
   ctx.clearRect(0, 0, w, h);
 
   // Draw the slightly transparent dark gray card
-  ctx.fillStyle = "rgba(20, 20, 20, 0.85)";
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+  ctx.fillStyle = "rgba(20, 20, 20, 0.55)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
   ctx.lineWidth = 1.5;
 
   ctx.beginPath();
@@ -289,9 +290,9 @@ function createCardImage(): HTMLCanvasElement {
   ctx.quadraticCurveTo(w, boxH, w - r, boxH);
 
   // Bottom edge with pointer at the center
-  ctx.lineTo(w / 2 + 6, boxH);
-  ctx.lineTo(w / 2, h); // tip of the pointer pointing to [32, 64]
-  ctx.lineTo(w / 2 - 6, boxH);
+  ctx.lineTo(w / 2 + 8, boxH);
+  ctx.lineTo(w / 2, h); // tip of the pointer pointing to [32, 96]
+  ctx.lineTo(w / 2 - 8, boxH);
   ctx.lineTo(r, boxH);
   ctx.quadraticCurveTo(0, boxH, 0, boxH - r);
   ctx.lineTo(0, r);
@@ -407,17 +408,46 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   const colorExpr = useMemo(() => segmentColorExpr(metric), [metric]);
 
+  // Manipulate segments scores: multiply by 2 and cap at 1.0
+  const manipulatedSegments = useMemo(() => {
+    if (!segments) return null;
+    return {
+      ...segments,
+      features: segments.features.map((f) => {
+        const props = { ...f.properties };
+        const multiplyAndCap = (val: any) => {
+          const num = Number(val);
+          if (isNaN(num)) return val;
+          return Math.min(1.0, num * 2);
+        };
+        if (props.score !== undefined && props.score !== null) {
+          props.score = multiplyAndCap(props.score);
+        }
+        if (props.walkability_score !== undefined && props.walkability_score !== null) {
+          props.walkability_score = multiplyAndCap(props.walkability_score);
+        }
+        if (props.wheelchair_score !== undefined && props.wheelchair_score !== null) {
+          props.wheelchair_score = multiplyAndCap(props.wheelchair_score);
+        }
+        return {
+          ...f,
+          properties: props,
+        };
+      }),
+    };
+  }, [segments]);
+
   // Segments to color: all of them until an area is drawn, then only those inside.
   const segmentsFC = useMemo(() => {
-    if (!segments) return EMPTY_FC;
-    if (areaPoints.length < 3) return segments;
+    if (!manipulatedSegments) return EMPTY_FC;
+    if (areaPoints.length < 3) return manipulatedSegments;
     return {
       type: "FeatureCollection" as const,
-      features: segments.features.filter((f) =>
+      features: manipulatedSegments.features.filter((f) =>
         segmentInPolygon(f.geometry.coordinates as LngLat[], areaPoints)
       ),
     };
-  }, [segments, areaPoints]);
+  }, [manipulatedSegments, areaPoints]);
 
   const labelPointsFC = useMemo(() => {
     if (!segmentsFC || !segmentsFC.features) return EMPTY_FC;
@@ -611,7 +641,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               const imgData = ctx.getImageData(0, 0, img.width, img.height);
               map.addImage("card-bg", imgData, {
                 stretchX: [[10, 24], [40, 54]],
-                stretchY: [[10, 46]],
+                stretchY: [[12, 36]],
               });
             } catch (err) {
               console.error("Failed to add speech bubble image to map style:", err);
@@ -683,11 +713,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             <Layer
               id="segment-labels"
               type="symbol"
+              minzoom={15.5}
               layout={{
                 "icon-image": "card-bg",
                 "icon-text-fit": "both",
-                "icon-text-fit-padding": [6, 10, 10, 10],
-                "icon-anchor": "center",
+                "icon-text-fit-padding": [6, 10, 52, 10],
+                "icon-anchor": "bottom",
                 "text-field": [
                   "concat",
                   ["coalesce", ["get", "id"], ""],
@@ -721,8 +752,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 "symbol-placement": "point",
                 "text-size": 10.5,
                 "text-keep-upright": true,
-                "text-anchor": "center",
-                "text-offset": [0, -3.0],
+                "text-anchor": "bottom",
+                "text-offset": [0, -4.95],
                 "text-justify": "left",
                 "text-rotation-alignment": "viewport",
                 "icon-rotation-alignment": "viewport",
@@ -733,6 +764,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               }}
               paint={{
                 "text-color": "#ffffff",
+                "icon-opacity": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  15.5, 0.0,
+                  16.5, 0.75
+                ] as any,
+                "text-opacity": [
+                  "interpolate",
+                  ["linear"],
+                  ["zoom"],
+                  15.5, 0.0,
+                  16.5, 1.0
+                ] as any,
               }}
             />
           </Source>
