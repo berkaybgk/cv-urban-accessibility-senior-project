@@ -98,6 +98,8 @@ export default function HomePage() {
   const [metric, setMetric] = useState<ScoreMetric>("walkability_score");
   const [hidePoints, setHidePoints] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [styleId, setStyleId] = useState("dark");
+  const isDarkStyle = styleId === "dark";
 
   const mapViewRef = useRef<MapViewHandle>(null);
 
@@ -343,6 +345,8 @@ export default function HomePage() {
         onAddAreaPoint={handleAddAreaPoint}
         metric={metric}
         hidePoints={hidePoints}
+        styleId={styleId}
+        onStyleIdChange={setStyleId}
       />
 
       {/* Top bar: title + search */}
@@ -447,6 +451,7 @@ export default function HomePage() {
           exporting={exporting}
           hidePoints={hidePoints}
           onToggleHidePoints={() => setHidePoints((v) => !v)}
+          isDark={isDarkStyle}
         />
       )}
 

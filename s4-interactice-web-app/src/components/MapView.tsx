@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   forwardRef,
+  useEffect,
 } from "react";
 import Map, {
   Layer,
@@ -95,6 +96,8 @@ interface MapViewProps {
   onAddAreaPoint?: (lngLat: LngLat) => void;
   metric?: ScoreMetric;
   hidePoints?: boolean;
+  styleId?: string;
+  onStyleIdChange?: (id: string) => void;
 }
 
 /**
@@ -117,7 +120,7 @@ function segmentColorExpr(metric: ScoreMetric) {
 const EMPTY_FC = { type: "FeatureCollection" as const, features: [] };
 
 /** Draw the score legend (with a metric title) onto an export canvas (bottom-left). */
-function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string) {
+function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string, isDark: boolean) {
   const pad = 10;
   const titleH = 20;
   const rowH = 20;
@@ -127,14 +130,14 @@ function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string
   const x = pad;
   const y = height - boxH - pad;
 
-  ctx.fillStyle = "rgba(17,17,17,0.82)";
-  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.fillStyle = isDark ? "rgba(17,17,17,0.82)" : "rgba(255,255,255,0.88)";
+  ctx.strokeStyle = isDark ? "rgba(255,255,255,0.25)" : "rgba(0, 0, 0, 0.15)";
   ctx.lineWidth = 1;
   ctx.fillRect(x, y, boxW, boxH);
   ctx.strokeRect(x, y, boxW, boxH);
 
   ctx.textBaseline = "middle";
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = isDark ? "#ffffff" : "#111111";
   ctx.font = "bold 13px sans-serif";
   ctx.fillText(title, x + pad, y + pad + titleH / 2);
 
@@ -143,7 +146,7 @@ function drawLegend(ctx: CanvasRenderingContext2D, height: number, title: string
     const ry = y + pad + titleH + i * rowH + rowH / 2;
     ctx.fillStyle = b.color;
     ctx.fillRect(x + pad, ry - swatch / 2, swatch, swatch);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = isDark ? "#ffffff" : "#222222";
     ctx.fillText(`${b.label} (${b.range})`, x + pad + swatch + 8, ry);
   });
 }
@@ -223,7 +226,7 @@ function calculateAreaStats(features: any[]): AreaStats {
   };
 }
 
-function drawSummary(ctx: CanvasRenderingContext2D, width: number, height: number, stats: AreaStats) {
+function drawSummary(ctx: CanvasRenderingContext2D, width: number, height: number, stats: AreaStats, isDark: boolean) {
   const pad = 10;
   const rowH = 18;
   const boxW = 200;
@@ -243,26 +246,26 @@ function drawSummary(ctx: CanvasRenderingContext2D, width: number, height: numbe
   const x = width - boxW - pad;
   const y = pad; // Top-right corner
 
-  ctx.fillStyle = "rgba(17,17,17,0.82)";
-  ctx.strokeStyle = "rgba(255,255,255,0.25)";
+  ctx.fillStyle = isDark ? "rgba(17,17,17,0.82)" : "rgba(255, 255, 255, 0.88)";
+  ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.15)";
   ctx.lineWidth = 1;
   ctx.fillRect(x, y, boxW, boxH);
   ctx.strokeRect(x, y, boxW, boxH);
 
   ctx.textBaseline = "middle";
-  ctx.fillStyle = "#ffffff";
+  ctx.fillStyle = isDark ? "#ffffff" : "#111111";
   ctx.font = "bold 13px sans-serif";
   ctx.fillText("Area Summary", x + pad, y + pad + titleH / 2);
 
   ctx.font = "11px sans-serif";
   rows.forEach((row, i) => {
     const ry = y + pad + titleH + i * rowH + rowH / 2;
-    ctx.fillStyle = "#e5e5e5";
+    ctx.fillStyle = isDark ? "#e5e5e5" : "#222222";
     ctx.fillText(row, x + pad, ry);
   });
 }
 
-function createCardImage(): HTMLCanvasElement {
+function createCardImage(isDark: boolean): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = 64;
   canvas.height = 96;
@@ -277,9 +280,9 @@ function createCardImage(): HTMLCanvasElement {
 
   ctx.clearRect(0, 0, w, h);
 
-  // Draw the slightly transparent dark gray card
-  ctx.fillStyle = "rgba(20, 20, 20, 0.55)";
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+  // Draw the slightly transparent card adapting to theme
+  ctx.fillStyle = isDark ? "rgba(20, 20, 20, 0.55)" : "rgba(255, 255, 255, 0.85)";
+  ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.18)";
   ctx.lineWidth = 1.5;
 
   ctx.beginPath();
@@ -393,18 +396,24 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onAddAreaPoint,
     metric = "walkability_score",
     hidePoints = false,
+    styleId = "dark",
+    onStyleIdChange,
   },
   ref
 ) {
   const mapRef = useRef<MapRef>(null);
   const [popupPoint, setPopupPoint] = useState<PointData | null>(null);
-  const [styleId, setStyleId] = useState("dark");
+  const [localStyleId, setLocalStyleId] = useState("dark");
+  const activeStyleId = onStyleIdChange ? styleId : localStyleId;
+  const setActiveStyleId = onStyleIdChange ? onStyleIdChange : setLocalStyleId;
 
   const geojson = buildGeoJSON(points);
   const mapStyleUrl =
-    MAP_STYLES.find((s) => s.id === styleId)?.url ?? MAP_STYLES[0].url;
+    MAP_STYLES.find((s) => s.id === activeStyleId)?.url ?? MAP_STYLES[0].url;
 
-  const isDarkStyle = styleId === "dark";
+  const isDarkStyle = activeStyleId === "dark";
+  const isDarkStyleRef = useRef(isDarkStyle);
+  isDarkStyleRef.current = isDarkStyle;
 
   const colorExpr = useMemo(() => segmentColorExpr(metric), [metric]);
 
@@ -557,11 +566,11 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           const ctx = out.getContext("2d");
           if (!ctx) throw new Error("Could not create export canvas.");
           ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
-          drawLegend(ctx, out.height, METRIC_LABELS[metric]);
+          drawLegend(ctx, out.height, METRIC_LABELS[metric], isDarkStyle);
 
           // Draw stats summary card
           const stats = calculateAreaStats(segmentsFC.features);
-          drawSummary(ctx, out.width, out.height, stats);
+          drawSummary(ctx, out.width, out.height, stats, isDarkStyle);
 
           let url: string;
           try {
@@ -634,7 +643,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       if (ev.id === "card-bg") {
         if (!addedImages.has("card-bg") && !map.hasImage("card-bg")) {
           addedImages.add("card-bg");
-          const img = createCardImage();
+          const img = createCardImage(isDarkStyleRef.current);
           const ctx = img.getContext("2d");
           if (ctx) {
             try {
@@ -652,6 +661,26 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }
     });
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current?.getMap();
+    if (map && map.hasImage("card-bg")) {
+      try {
+        map.removeImage("card-bg");
+        const img = createCardImage(isDarkStyle);
+        const ctx = img.getContext("2d");
+        if (ctx) {
+          const imgData = ctx.getImageData(0, 0, img.width, img.height);
+          map.addImage("card-bg", imgData, {
+            stretchX: [[10, 24], [40, 54]],
+            stretchY: [[12, 36]],
+          });
+        }
+      } catch (err) {
+        console.error("Failed to update card-bg image dynamically:", err);
+      }
+    }
+  }, [isDarkStyle]);
 
   return (
     <Map
@@ -763,7 +792,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 "icon-ignore-placement": true,
               }}
               paint={{
-                "text-color": "#ffffff",
+                "text-color": isDarkStyle ? "#ffffff" : "#111111",
                 "icon-opacity": [
                   "interpolate",
                   ["linear"],
@@ -882,7 +911,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         </Popup>
       )}
 
-      <StyleSwitcher current={styleId} onChange={setStyleId} />
+      <StyleSwitcher current={activeStyleId} onChange={setActiveStyleId} />
     </Map>
   );
 });

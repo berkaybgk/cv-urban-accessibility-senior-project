@@ -16,6 +16,7 @@ interface AccessibilityPanelProps {
   exporting: boolean;
   hidePoints: boolean;
   onToggleHidePoints: () => void;
+  isDark?: boolean;
 }
 
 const METRICS: ScoreMetric[] = ["walkability_score", "wheelchair_score"];
@@ -33,25 +34,34 @@ export default function AccessibilityPanel({
   exporting,
   hidePoints,
   onToggleHidePoints,
+  isDark = true,
 }: AccessibilityPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canExport = segmentCount !== null && areaPointCount === 4 && !exporting;
 
   return (
-    <div className="absolute right-4 top-4 z-20 w-72 rounded-lg border border-neutral-700/60 bg-neutral-900/90 p-3 text-neutral-100 backdrop-blur-sm">
+    <div className={`absolute right-4 top-4 z-20 w-72 rounded-lg border p-3 backdrop-blur-sm transition-colors duration-200 ${
+      isDark
+        ? "border-neutral-700/60 bg-neutral-900/90 text-neutral-100"
+        : "border-neutral-200 bg-white/95 text-neutral-800 shadow-lg"
+    }`}>
       <div className="mb-2 text-sm font-semibold">Accessibility map</div>
 
       {/* Metric toggle */}
-      <div className="mb-2 flex gap-1 rounded-md bg-neutral-800 p-0.5">
+      <div className={`mb-2 flex gap-1 rounded-md p-0.5 transition-colors duration-200 ${
+        isDark ? "bg-neutral-800" : "bg-neutral-100"
+      }`}>
         {METRICS.map((m) => (
           <button
             key={m}
             onClick={() => onMetricChange(m)}
-            className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+            className={`flex-1 rounded px-2 py-1 text-xs font-medium transition-all ${
               metric === m
-                ? "bg-emerald-600 text-white"
-                : "text-neutral-300 hover:bg-neutral-700"
+                ? "bg-emerald-600 text-white shadow-sm"
+                : isDark
+                  ? "text-neutral-300 hover:bg-neutral-700"
+                  : "text-neutral-600 hover:bg-neutral-200"
             }`}
           >
             {METRIC_LABELS[m]}
@@ -62,7 +72,11 @@ export default function AccessibilityPanel({
       {/* 1. Load scored GeoJSON (one or many) */}
       <button
         onClick={() => fileInputRef.current?.click()}
-        className="mb-1 w-full rounded-md bg-neutral-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-neutral-600"
+        className={`mb-1 w-full rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+          isDark
+            ? "bg-neutral-700 text-white hover:bg-neutral-600"
+            : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200 border border-neutral-200"
+        }`}
       >
         Load scored GeoJSON (one or many)
       </button>
@@ -78,7 +92,9 @@ export default function AccessibilityPanel({
           e.target.value = "";
         }}
       />
-      <p className="mb-2 text-[11px] text-neutral-400">
+      <p className={`mb-2 text-[11px] transition-colors ${
+        isDark ? "text-neutral-400" : "text-neutral-500"
+      }`}>
         {segmentCount === null
           ? "Pick a metric, then load LineString features. Multiple files merge together."
           : `${segmentCount} segments loaded. Loading more adds to these.`}
@@ -89,14 +105,20 @@ export default function AccessibilityPanel({
       {segmentCount !== null && (
         <button
           onClick={onClearSegments}
-          className="mb-2 w-full rounded-md border border-neutral-700 px-2 py-1 text-[11px] hover:bg-neutral-800"
+          className={`mb-2 w-full rounded-md border px-2 py-1 text-[11px] transition-colors ${
+            isDark
+              ? "border-neutral-700 hover:bg-neutral-800 text-neutral-300"
+              : "border-neutral-300 hover:bg-neutral-100 text-neutral-600"
+          }`}
         >
           Clear loaded segments
         </button>
       )}
 
       {/* 2. Pick area corners */}
-      <p className="mb-2 text-xs text-neutral-300">
+      <p className={`mb-2 text-xs transition-colors ${
+        isDark ? "text-neutral-300" : "text-neutral-600"
+      }`}>
         Pick 4 corners on the map:{" "}
         <span className="font-semibold">{areaPointCount}/4</span>
       </p>
@@ -104,7 +126,11 @@ export default function AccessibilityPanel({
       {/* Hide point markers (cleaner PNG export) */}
       <button
         onClick={onToggleHidePoints}
-        className="mb-3 w-full rounded-md border border-neutral-700 px-2 py-1 text-[11px] hover:bg-neutral-800"
+        className={`mb-3 w-full rounded-md border px-2 py-1 text-[11px] transition-colors ${
+          isDark
+            ? "border-neutral-700 hover:bg-neutral-800 text-neutral-300"
+            : "border-neutral-300 hover:bg-neutral-100 text-neutral-600"
+        }`}
       >
         {hidePoints ? "Show point markers" : "Hide point markers"}
       </button>
@@ -117,8 +143,8 @@ export default function AccessibilityPanel({
               className="inline-block h-3 w-3 rounded-sm"
               style={{ backgroundColor: b.color }}
             />
-            <span className="text-neutral-200">{b.label}</span>
-            <span className="text-neutral-500">{b.range}</span>
+            <span className={isDark ? "text-neutral-200" : "text-neutral-700"}>{b.label}</span>
+            <span className={isDark ? "text-neutral-500" : "text-neutral-400"}>{b.range}</span>
           </div>
         ))}
       </div>
@@ -135,7 +161,11 @@ export default function AccessibilityPanel({
         {areaPointCount > 0 && (
           <button
             onClick={onClearArea}
-            className="rounded-md border border-neutral-700 px-2 py-1.5 text-xs hover:bg-neutral-800"
+            className={`rounded-md border px-2 py-1.5 text-xs transition-colors ${
+              isDark
+                ? "border-neutral-700 hover:bg-neutral-800 text-neutral-300"
+                : "border-neutral-300 hover:bg-neutral-100 text-neutral-600"
+            }`}
           >
             Clear area
           </button>
