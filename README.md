@@ -1,4 +1,4 @@
-# Accessibility-Aware Urban Street Analysis Using Street View Imagery
+<img width="1254" height="1254" alt="a7493fbc-b106-4ed0-9fdd-b6a968279998" src="https://github.com/user-attachments/assets/d0821ec6-dccb-46d6-b4fd-e7752d8951d1" /># Accessibility-Aware Urban Street Analysis Using Street View Imagery
 
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-15.0-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
@@ -12,17 +12,57 @@ An automated, computer-vision-powered pipeline that estimates sidewalk geometry,
 ## Application Interface & Visualizations
 
 ### 1. Web Application: Colored Accessibility Segments
-*Below is a placeholder for the interactive web application displaying accessibility classifications across street networks:*
 
-![Interactive Web App - Colored Accessibility Segments](/docs/screenshots/app_colored_segments.png)
+<img width="2458" height="1592" alt="accessibility-walkability_score (3)" src="https://github.com/user-attachments/assets/3c2058cb-ec98-4229-a262-2b98262bbb37" />
+
 
 ### 2. Sidewalk Processing Pipeline
-*Placeholders for the intermediate steps of the rectification and obstacle detection pipeline:*
 
-| SAM 3 Segmentation Mask | Rectified Sidewalk Strip & Obstacles | Multi-View Stitching via LoFTR |
-| :---: | :---: | :---: |
-| ![SAM 3 Mask](/docs/screenshots/sam3_mask.png) | ![Rectified Strip](/docs/screenshots/rectified_strip.png) | ![LoFTR Merge](/docs/screenshots/loftr_merge.png) |
-| *Zero-shot multi-class masks* | *Top-down metric projection* | *Aligned consecutive tiles* |
+<table>
+<tr>
+<td align="center" width="33%">
+
+**SAM 3 Segmentation Mask**
+
+<br>
+
+<img src="https://github.com/user-attachments/assets/a0657997-eef8-4242-ac8b-367a173255d5" width="300">
+
+<br>
+
+*Zero-shot multi-class masks*
+
+</td>
+
+<td align="center" width="33%">
+
+**Rectified Sidewalk Strip & Obstacles**
+
+<br>
+
+<img src="https://github.com/user-attachments/assets/ec064ab8-2af6-45d2-86b3-5d66e559d6df" width="180">
+
+<br>
+
+*Top-down metric projection*
+
+</td>
+
+<td align="center" width="33%">
+
+**Multi-View Stitching via LoFTR**
+
+<br>
+
+<img src="https://github.com/user-attachments/assets/ec56365d-76ed-45f7-8f26-af850ce88104" width="180">
+
+<br>
+
+*Aligned consecutive tiles*
+
+</td>
+</tr>
+</table>
 
 ---
 
@@ -37,7 +77,8 @@ An automated, computer-vision-powered pipeline that estimates sidewalk geometry,
 
 ## System Workflow
 
-![Methodology](/docs/screenshots/methodology.png)
+<img width="1254" height="1254" alt="a7493fbc-b106-4ed0-9fdd-b6a968279998" src="https://github.com/user-attachments/assets/636141fe-cadc-43e8-bd4d-0ebcd97aab89" />
+
 
 ---
 
