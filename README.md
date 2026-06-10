@@ -1,5 +1,3 @@
-<img width="1254" height="1254" alt="a7493fbc-b106-4ed0-9fdd-b6a968279998" src="https://github.com/user-attachments/assets/d0821ec6-dccb-46d6-b4fd-e7752d8951d1" /># Accessibility-Aware Urban Street Analysis Using Street View Imagery
-
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![Next.js](https://img.shields.io/badge/Next.js-15.0-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Modern%20API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
